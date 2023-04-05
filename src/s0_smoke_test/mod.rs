@@ -11,7 +11,8 @@ pub async fn process(mut stream: TcpStream) -> io::Result<usize> {
     while let Ok(len) = stream.read_buf(&mut buf).await {
         if len > 0 {
             println!("GOT {:?}\n", buf);
-            stream.write_buf(&mut buf).await;
+            let _ = stream.write_buf(&mut buf).await;
+
         } else {
             break;
         }
