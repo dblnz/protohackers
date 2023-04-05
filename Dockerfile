@@ -1,5 +1,9 @@
 FROM rust:1.68.0-slim-bullseye AS builder
 
+ARG APP_NAME=protohackers
+
+RUN echo "Preparing app ${APP_NAME}"
+
 WORKDIR /app
 COPY . .
 RUN --mount=type=cache,target=/app/target \
@@ -9,10 +13,12 @@ RUN --mount=type=cache,target=/app/target \
 		set -eux; \
 		rustup install stable; \
 	 	cargo build --release; \
-		objcopy --compress-debug-sections target/release/smoke_test ./smoke_test
+		objcopy --compress-debug-sections target/release/$APP_NAME ./$APP_NAME
 
 ################################################################################
 FROM debian:11.3-slim
+ARG APP_NAME=protohackers
+RUN echo "Preparing app ${APP_NAME}"
 
 RUN set -eux; \
 		export DEBIAN_FRONTEND=noninteractive; \
@@ -27,5 +33,7 @@ WORKDIR app
 
 EXPOSE 8080
 
-COPY --from=builder /app/smoke_test ./smoke_test
-CMD ["./smoke_test"]
+COPY --from=builder /app/$APP_NAME ./$APP_NAME
+ENV envValue=${APP_NAME}
+
+CMD ./${envValue}

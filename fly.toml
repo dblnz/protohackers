@@ -7,6 +7,7 @@ primary_region = "otp"
   image = "protohackers"
 
 [env]
+  APP_NAME = "protohackers"
   INTERNAL_PORT = "8080"
   EXPOSED_PORT = "8080"
   PRIMARY_REGION = "otp"
