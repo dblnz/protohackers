@@ -1,11 +1,13 @@
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-use tokio::net::TcpListener;
+use tokio::net::{TcpListener, TcpStream};
+
+mod solution;
+use solution::{ProtoHSolution, SolutionError};
+mod s0_smoke_test;
+use s0_smoke_test::SmokeTestSolution;
 
 const IP: Ipv4Addr = Ipv4Addr::new(0, 0, 0, 0);
 const PORT: u16 = 8080;
-
-mod s0_smoke_test;
-use s0_smoke_test::process;
 
 #[tokio::main]
 async fn main() {
@@ -35,4 +37,10 @@ async fn main() {
         println!("Processing result: {:?}", out);
         println!("Connection closed\n");
     }
+}
+
+pub async fn process(stream: TcpStream) -> Result<usize, SolutionError> {
+    let mut s = SmokeTestSolution {};
+
+    s.handle_stream(stream).await
 }
