@@ -1,11 +1,11 @@
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-use tokio::{net::TcpListener};
+use tokio::net::TcpListener;
 
 const IP: Ipv4Addr = Ipv4Addr::new(0, 0, 0, 0);
 const PORT: u16 = 8080;
 
-mod smoke_test;
-use smoke_test::process;
+mod s0_smoke_test;
+use s0_smoke_test::process;
 
 #[tokio::main]
 async fn main() {
@@ -14,9 +14,7 @@ async fn main() {
     println!("Listening on {:?}:{:?}...", IP, PORT);
 
     // Bind the listener to the address
-    let listener = TcpListener::bind(&addr)
-        .await
-        .unwrap();
+    let listener = TcpListener::bind(&addr).await.unwrap();
 
     loop {
         println!("Waiting for connection ...");
@@ -29,11 +27,12 @@ async fn main() {
         // moved to the new task and processed there.
         let handle = tokio::spawn(async move {
             // Do some async work
-            process(socket).await;
+            process(socket).await
         });
 
-        // Do some other work
+        // Wait for the job
         let out = handle.await.unwrap();
+        println!("Processing result: {:?}", out);
         println!("Connection closed\n");
     }
 }

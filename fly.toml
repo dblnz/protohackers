@@ -1,0 +1,19 @@
+app = "protoh-doru"
+kill_signal = "SIGINT"
+kill_timeout = 5
+primary_region = "otp"
+
+[build]
+  image = "protohackers"
+
+[env]
+  INTERNAL_PORT = "8080"
+  EXPOSED_PORT = "8080"
+  PRIMARY_REGION = "otp"
+
+[[services]]
+  protocol = "tcp"
+  internal_port = 8080
+
+  [[services.ports]]
+    port = "8080"
