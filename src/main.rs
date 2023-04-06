@@ -5,6 +5,8 @@ mod solution;
 use solution::{ProtoHSolution, SolutionError};
 mod s0_smoke_test;
 use s0_smoke_test::SmokeTestSolution;
+mod s1_prime_time;
+use s1_prime_time::PrimeTimeSolution;
 
 const IP: Ipv4Addr = Ipv4Addr::new(0, 0, 0, 0);
 const PORT: u16 = 8080;
@@ -50,7 +52,7 @@ async fn main() {
 }
 
 pub async fn process(stream: TcpStream) -> Result<usize, SolutionError> {
-    let mut s = SmokeTestSolution {};
+    let mut s = PrimeTimeSolution {};
 
     s.handle_stream(stream).await
 }
