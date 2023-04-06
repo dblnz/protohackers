@@ -27,15 +27,25 @@ async fn main() {
         println!("Connection open\n");
         // A new task is spawned for each inbound socket. The socket is
         // moved to the new task and processed there.
-        let handle = tokio::spawn(async move {
+        tokio::spawn(async move {
             // Do some async work
-            process(socket).await
+            match process(socket).await {
+                Ok(len) => {
+                    println!("Processing successful. Got: {} bytes", len);
+                }
+                Err(SolutionError::Read) => {
+                    println!("There was a Read Error involved in the processing of the request");
+                }
+                Err(SolutionError::General) => {
+                    println!(
+                        "There was a General Type Error involved in the processing of the request"
+                    );
+                }
+                Err(SolutionError::Write) => {
+                    println!("There was a Write Error involved in the processing of the request");
+                }
+            }
         });
-
-        // Wait for the job
-        let out = handle.await.unwrap();
-        println!("Processing result: {:?}", out);
-        println!("Connection closed\n");
     }
 }
 
