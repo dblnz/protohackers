@@ -1,12 +1,12 @@
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
-use crate::solution::ProtoHSolution;
+use crate::solution::{ProtoHSolution, SolutionError};
 
 #[derive(Debug, Deserialize, PartialEq, Serialize)]
 struct ConformingReqObj {
     method: String,
-    number: u32,
+    number: i64,
 }
 #[derive(Debug, Deserialize, PartialEq, Serialize)]
 struct ConformingRespObj {
@@ -16,7 +16,7 @@ struct ConformingRespObj {
 
 #[derive(Debug, PartialEq)]
 enum Request {
-    ConformingReq { method: String, number: u32 },
+    ConformingReq { method: String, number: i64 },
     MalformedReq,
 }
 
@@ -28,7 +28,7 @@ enum Response {
 
 impl Request {
     fn from_bytes(line: &[u8]) -> Request {
-        let obj: Option<ConformingReqObj> = serde_json::from_slice(line).ok();
+        let obj = serde_json::from_slice::<ConformingReqObj>(line).ok();
 
         match obj {
             Some(ConformingReqObj { method, number }) => {
@@ -52,11 +52,10 @@ impl Request {
         }
     }
 
-    fn is_prime(number: u32) -> bool {
+    fn is_prime(number: i64) -> bool {
         if number < 2 {
             false
-        }
-        else {
+        } else {
             !(2..number / 2).any(|n| number % n == 0)
         }
     }
@@ -71,10 +70,10 @@ impl Response {
                 let mut res = serde_json::to_string(&obj).unwrap();
                 // Add newline
                 res.push('\n');
-                
+
                 res.as_bytes().to_vec()
             }
-            Response::MalformedResp => b"malformed".to_vec(),
+            Response::MalformedResp => b"malformed\n".to_vec(),
         }
     }
 }
@@ -84,7 +83,7 @@ pub struct PrimeTimeSolution;
 
 #[async_trait]
 impl ProtoHSolution for PrimeTimeSolution {
-    fn process_request(&mut self, line: &[u8]) -> Vec<u8> {
+    fn process_request(&mut self, line: &[u8]) -> Result<Vec<u8>, SolutionError> {
         // Construct a request from the u8 vec
         let req = Request::from_bytes(line);
 
@@ -92,7 +91,13 @@ impl ProtoHSolution for PrimeTimeSolution {
         let resp = req.process();
 
         // Get a string from the response
-        resp.into_bytes()
+        match resp {
+            Response::ConformingResp {
+                method: _,
+                prime: _,
+            } => Ok(resp.into_bytes()),
+            Response::MalformedResp => Err(SolutionError::InvalidRequest(resp.into_bytes())),
+        }
     }
 }
 
@@ -373,6 +378,35 @@ mod test {
             Request::ConformingReq {
                 method: "isPrime".to_string(),
                 number: 1
+            }
+        );
+        let resp = req.process();
+        assert_eq!(
+            resp,
+            Response::ConformingResp {
+                method: "isPrime".to_string(),
+                prime: false
+            }
+        );
+        assert_eq!(
+            resp.into_bytes(),
+            "{\"method\":\"isPrime\",\"prime\":false}\n"
+                .to_string()
+                .as_bytes()
+                .to_vec()
+        );
+    }
+
+    #[test]
+    fn test_req_to_vec_not_prime_negative_success() {
+        let line = b"{\"number\":-3,\"method\":\"isPrime\"}";
+        let req = Request::from_bytes(line);
+
+        assert_eq!(
+            req,
+            Request::ConformingReq {
+                method: "isPrime".to_string(),
+                number: -3
             }
         );
         let resp = req.process();

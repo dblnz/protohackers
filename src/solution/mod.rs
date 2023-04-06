@@ -1,18 +1,18 @@
 use async_trait::async_trait;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufStream, AsyncReadExt};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufStream};
 
 /// Custom Error type used to treat Solution specific errors
 #[derive(Debug)]
 pub enum SolutionError {
-    General,
-    Read,
-    Write,
+    InvalidRequest(Vec<u8>),
+    InvalidRead,
+    InvalidWrite,
 }
 
 #[async_trait]
 pub trait ProtoHSolution {
     /// Custom method to process each received request/line
-    fn process_request(&mut self, line: &[u8]) -> Vec<u8>;
+    fn process_request(&mut self, line: &[u8]) -> Result<Vec<u8>, SolutionError>;
 
     /// Handles a stream that produces requests the Solution has to respond to.
     ///
@@ -23,42 +23,52 @@ pub trait ProtoHSolution {
     /// requests in a different way(e.g. multi line)
     async fn handle_stream<T>(&mut self, socket: T) -> Result<usize, SolutionError>
     where
-        T: AsyncReadExt + AsyncWriteExt + Send + Sync + Unpin {
-
+        T: AsyncReadExt + AsyncWriteExt + Send + Sync + Unpin,
+    {
         let mut stream = BufStream::new(socket);
         let mut line = String::new();
         let mut len = 0;
+        let mut should_continue = true;
 
         // Loop until no bytes are read
-        loop {
+        while should_continue {
             // Read line - Return ReadError in case of fail
             let read_len = stream
                 .read_line(&mut line)
                 .await
-                .map_err(|_| SolutionError::Read)?;
+                .map_err(|_| SolutionError::InvalidRead)?;
 
             if read_len > 0 {
-
                 len += read_len;
 
-                dbg!(&line);
-
                 // Process the received request/line
-                // TODO: Prime Time says we need to close connection when malformed
-                let response = self.process_request(&line.as_bytes());
-
-                dbg!(String::from_utf8(response.clone()).unwrap());
+                let response = match self.process_request(&line.as_bytes()) {
+                    Ok(arr) => arr,
+                    Err(SolutionError::InvalidRequest(arr)) => {
+                        // In case an error occures stop reading
+                        should_continue = false;
+                        arr
+                    }
+                    _ => {
+                        // In case an error occures stop reading
+                        should_continue = false;
+                        vec![]
+                    }
+                };
 
                 // Send back the result
                 stream
                     .write_all(&response)
                     .await
-                    .map_err(|_| SolutionError::Write)?;
+                    .map_err(|_| SolutionError::InvalidWrite)?;
 
                 // Flush the buffer to ensure it is sent
-                stream.flush().await.map_err(|_| SolutionError::Write)?;
+                stream
+                    .flush()
+                    .await
+                    .map_err(|_| SolutionError::InvalidWrite)?;
             } else {
-                break;
+                should_continue = false;
             }
 
             line.clear();
