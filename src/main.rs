@@ -35,15 +35,15 @@ async fn main() {
                 Ok(len) => {
                     println!("Processing successful. Got: {} bytes", len);
                 }
-                Err(SolutionError::Read) => {
+                Err(SolutionError::InvalidRead) => {
                     println!("There was a Read Error involved in the processing of the request");
                 }
-                Err(SolutionError::General) => {
+                Err(SolutionError::InvalidRequest(_)) => {
                     println!(
                         "There was a General Type Error involved in the processing of the request"
                     );
                 }
-                Err(SolutionError::Write) => {
+                Err(SolutionError::InvalidWrite) => {
                     println!("There was a Write Error involved in the processing of the request");
                 }
             }
