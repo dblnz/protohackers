@@ -8,23 +8,32 @@ mod prime_time {
 
     use crate::solution::{ProtoHSolution, SolutionError};
 
+    /// Conforming Request object
+    /// Used for deserializing JSON bytes received
     #[derive(Debug, Deserialize, PartialEq, Serialize)]
     struct ConformingReqObj {
         pub method: String,
         pub number: f64,
     }
+    /// Conforming Response object
+    /// Used for serializing JSON before sending
     #[derive(Debug, Deserialize, PartialEq, Serialize)]
     struct ConformingRespObj {
         method: String,
         prime: bool,
     }
 
+    /// Request type
+    /// Constructed based on bytes and verified if it
+    /// satisfies the solution conditions
     #[derive(Debug, PartialEq)]
     enum Request {
         ConformingReq { method: String, number: f64 },
         MalformedReq,
     }
 
+    /// Response type
+    /// Constructed based on a processed request
     #[derive(Debug, PartialEq)]
     enum Response {
         ConformingResp { method: String, prime: bool },
