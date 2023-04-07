@@ -1,12 +1,24 @@
+use cfg_if::cfg_if;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use tokio::net::{TcpListener, TcpStream};
 
 mod solution;
 use solution::{ProtoHSolution, SolutionError};
-mod s0_smoke_test;
-use s0_smoke_test::SmokeTestSolution;
-mod s1_prime_time;
-use s1_prime_time::PrimeTimeSolution;
+
+cfg_if! {
+    if #[cfg(feature = "s0")] {
+        mod s0_smoke_test;
+        use s0_smoke_test::SmokeTestSolution;
+        type Solution = SmokeTestSolution;
+    } else if #[cfg(feature = "s1")] {
+        mod s1_prime_time;
+        use s1_prime_time::PrimeTimeSolution;
+        type Solution = PrimeTimeSolution;
+    }
+    else {
+        compile_error!("Either feature \"s0\" or \"s1\" must be enabled for this app.");
+    }
+}
 
 const IP: Ipv4Addr = Ipv4Addr::new(0, 0, 0, 0);
 const PORT: u16 = 8080;
@@ -35,15 +47,15 @@ async fn main() {
                 Ok(len) => {
                     println!("Processing successful. Got: {} bytes", len);
                 }
-                Err(SolutionError::InvalidRead) => {
+                Err(SolutionError::Read) => {
                     println!("There was a Read Error involved in the processing of the request");
                 }
-                Err(SolutionError::InvalidRequest(_)) => {
+                Err(SolutionError::Request(_)) => {
                     println!(
                         "There was a General Type Error involved in the processing of the request"
                     );
                 }
-                Err(SolutionError::InvalidWrite) => {
+                Err(SolutionError::Write) => {
                     println!("There was a Write Error involved in the processing of the request");
                 }
             }
@@ -52,7 +64,7 @@ async fn main() {
 }
 
 pub async fn process(stream: TcpStream) -> Result<usize, SolutionError> {
-    let mut s = PrimeTimeSolution {};
+    let mut s = Solution {};
 
     s.handle_stream(stream).await
 }
