@@ -4,9 +4,9 @@ use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufStream};
 /// Custom Error type used to treat Solution specific errors
 #[derive(Debug)]
 pub enum SolutionError {
-    InvalidRequest(Vec<u8>),
-    InvalidRead,
-    InvalidWrite,
+    Request(Vec<u8>),
+    Read,
+    Write,
 }
 
 #[async_trait]
@@ -36,15 +36,15 @@ pub trait ProtoHSolution {
             let read_len = stream
                 .read_line(&mut line)
                 .await
-                .map_err(|_| SolutionError::InvalidRead)?;
+                .map_err(|_| SolutionError::Read)?;
 
             if read_len > 0 {
                 len += read_len;
 
                 // Process the received request/line
-                let response = match self.process_request(&line.as_bytes()) {
+                let response = match self.process_request(line.as_bytes()) {
                     Ok(arr) => arr,
-                    Err(SolutionError::InvalidRequest(arr)) => {
+                    Err(SolutionError::Request(arr)) => {
                         // In case an error occures stop reading
                         should_continue = false;
                         arr
@@ -56,17 +56,17 @@ pub trait ProtoHSolution {
                     }
                 };
 
-                // Send back the result
-                stream
-                    .write_all(&response)
-                    .await
-                    .map_err(|_| SolutionError::InvalidWrite)?;
+                // If there's something to send
+                if !response.is_empty() {
+                    // Send back the result
+                    stream
+                        .write_all(&response)
+                        .await
+                        .map_err(|_| SolutionError::Write)?;
 
-                // Flush the buffer to ensure it is sent
-                stream
-                    .flush()
-                    .await
-                    .map_err(|_| SolutionError::InvalidWrite)?;
+                    // Flush the buffer to ensure it is sent
+                    stream.flush().await.map_err(|_| SolutionError::Write)?;
+                }
             } else {
                 should_continue = false;
             }
