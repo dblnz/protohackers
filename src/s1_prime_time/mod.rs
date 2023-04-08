@@ -136,6 +136,12 @@ mod prime_time {
     #[derive(Debug)]
     pub struct PrimeTimeSolution;
 
+    impl PrimeTimeSolution {
+        pub fn new() -> Self {
+            Self
+        }
+    }
+
     #[async_trait]
     impl ProtoHSolution for PrimeTimeSolution {
         fn process_request(&mut self, line: &[u8]) -> Result<Vec<u8>, SolutionError> {

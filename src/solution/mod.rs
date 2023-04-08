@@ -9,8 +9,24 @@ pub enum SolutionError {
     Write,
 }
 
+#[derive(Debug)]
+pub enum RequestDelimiter {
+    UntilChar(u8),
+    #[cfg(feature = "s2")]
+    NoOfBytes(usize),
+}
+
 #[async_trait]
 pub trait ProtoHSolution {
+    /// Static method to get the delimiter between two requests
+    /// This should be statically defined by each Custom solution
+    ///
+    /// The default implementation sets newline as the delimiter
+    fn get_delimiter() -> RequestDelimiter {
+        // Return newline
+        RequestDelimiter::UntilChar('\n' as u8)
+    }
+
     /// Custom method to process each received request/line
     fn process_request(&mut self, line: &[u8]) -> Result<Vec<u8>, SolutionError>;
 
@@ -26,23 +42,33 @@ pub trait ProtoHSolution {
         T: AsyncReadExt + AsyncWriteExt + Send + Sync + Unpin,
     {
         let mut stream = BufStream::new(socket);
-        let mut line = String::new();
+        let mut line = vec![];
         let mut len = 0;
         let mut should_continue = true;
 
         // Loop until no bytes are read
         while should_continue {
             // Read line - Return ReadError in case of fail
-            let read_len = stream
-                .read_line(&mut line)
-                .await
-                .map_err(|_| SolutionError::Read)?;
+            let read_len = match Self::get_delimiter() {
+                RequestDelimiter::UntilChar(del) => stream
+                    .read_until(del, &mut line)
+                    .await
+                    .map_err(|_| SolutionError::Read)?,
+                #[cfg(feature = "s2")]
+                RequestDelimiter::NoOfBytes(n) => {
+                    line = vec![0; n];
+                    stream
+                        .read_exact(&mut line)
+                        .await
+                        .map_err(|_| SolutionError::Read)?
+                }
+            };
 
             if read_len > 0 {
                 len += read_len;
 
                 // Process the received request/line
-                let response = match self.process_request(line.as_bytes()) {
+                let response = match self.process_request(&line) {
                     Ok(arr) => arr,
                     Err(SolutionError::Request(arr)) => {
                         // In case an error occures stop reading

@@ -14,9 +14,13 @@ cfg_if! {
         mod s1_prime_time;
         use s1_prime_time::PrimeTimeSolution;
         type Solution = PrimeTimeSolution;
+    } else if #[cfg(feature = "s2")] {
+        mod s2_means_to_an_end;
+        use s2_means_to_an_end::MeansToAnEndSolution;
+        type Solution = MeansToAnEndSolution;
     }
     else {
-        compile_error!("Either feature \"s0\" or \"s1\" must be enabled for this app.");
+        compile_error!("Either feature \"s0\", \"s1\" or \"s2\" must be enabled for this app.");
     }
 }
 
@@ -64,7 +68,7 @@ async fn main() {
 }
 
 pub async fn process(stream: TcpStream) -> Result<usize, SolutionError> {
-    let mut s = Solution {};
+    let mut s = Solution::new();
 
     s.handle_stream(stream).await
 }
