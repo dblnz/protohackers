@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufStream};
 
 /// Custom Error type used to treat Solution specific errors
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum SolutionError {
     Request(Vec<u8>),
     Read,
@@ -24,7 +24,7 @@ pub trait ProtoHSolution {
     /// The default implementation sets newline as the delimiter
     fn get_delimiter() -> RequestDelimiter {
         // Return newline
-        RequestDelimiter::UntilChar('\n' as u8)
+        RequestDelimiter::UntilChar(b'\n')
     }
 
     /// Custom method to process each received request/line
