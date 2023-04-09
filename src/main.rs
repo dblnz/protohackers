@@ -1,3 +1,5 @@
+#![deny(warnings)]
+
 use cfg_if::cfg_if;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use tokio::net::{TcpListener, TcpStream};

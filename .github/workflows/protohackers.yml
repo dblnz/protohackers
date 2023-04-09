@@ -1,0 +1,39 @@
+name: ProtoHackers CI
+
+on:
+  push:
+    branches: ["develop"]
+  pull_request:
+    branches: ["develop"]
+
+jobs:
+  tests:
+    name: ${{ matrix.solution }} (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        solution: ["s1", "s2"]
+        os: [ubuntu-latest]
+        rust: [stable]
+        make:
+          - name: Build
+            task: cargo build --release
+          - name: Clippy
+            task: cargo clippy
+          - name: Unit tests
+            task: cargo test --release
+    steps:
+    # Checkout Repo
+    - uses: actions/checkout@v3
+
+    - name: Install Rust ${{ matrix.rust }}
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: ${{ matrix.rust }}
+        override: true
+        profile: minimal
+        components: rustfmt, clippy
+
+    - name: ${{ matrix.make.name }}
+      run: ${{ matrix.make.task }} --features ${{ matrix.solution }}
