@@ -12,7 +12,7 @@ RUN --mount=type=cache,target=/app/target \
 		--mount=type=cache,target=/usr/local/rustup \
 		set -eux; \
 		rustup install stable; \
-	 	cargo build --release; \
+	 	cargo build --release --features s2; \
 		objcopy --compress-debug-sections target/release/$APP_NAME ./$APP_NAME
 
 ################################################################################
