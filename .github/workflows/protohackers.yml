@@ -1,0 +1,40 @@
+name: ProtoHackers CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+
+jobs:
+  tests:
+    name: ${{ matrix.solution }} (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        solution: ["s0", "s1", "s2"]
+        os: [ubuntu-latest]
+        rust: [stable]
+        make:
+          - name: Build
+            task: cargo build --${{env.BUILD_TYPE}}
+          - name: Clippy
+            task: cargo check-clippy
+          - name: Unit tests
+            task: cargo test
+    env:
+      # Customize the CMake build type here (Release, Debug, RelWithDebInfo, etc.)
+      BUILD_TYPE: release
+    steps:
+    # Checkout Repo
+    - uses: actions/checkout@v3
+    - name: Install Rust stable
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: ${{ matrix.rust }}
+          profile: minimal
+          override: true
+
+    - name: ${{ matrix.make.name }}
+        run: ${{ matrix.make.task }} --features ${{ matrix.solution }}
