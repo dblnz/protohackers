@@ -4,8 +4,7 @@ use cfg_if::cfg_if;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use tokio::net::{TcpListener, TcpStream};
 
-mod solution;
-use solution::{ProtoHSolution, SolutionError};
+use traits::{Protocol, SolutionError};
 
 cfg_if! {
     if #[cfg(feature = "s0")] {

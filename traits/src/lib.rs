@@ -12,12 +12,11 @@ pub enum SolutionError {
 #[derive(Debug)]
 pub enum RequestDelimiter {
     UntilChar(u8),
-    #[cfg(feature = "s2")]
     NoOfBytes(usize),
 }
 
 #[async_trait]
-pub trait ProtoHSolution {
+pub trait Protocol {
     /// Static method to get the delimiter between two requests
     /// This should be statically defined by each Custom solution
     ///
@@ -54,7 +53,6 @@ pub trait ProtoHSolution {
                     .read_until(del, &mut line)
                     .await
                     .map_err(|_| SolutionError::Read)?,
-                #[cfg(feature = "s2")]
                 RequestDelimiter::NoOfBytes(n) => {
                     line = vec![0; n];
                     stream

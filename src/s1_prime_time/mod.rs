@@ -6,7 +6,7 @@ mod prime_time {
     use async_trait::async_trait;
     use serde::{Deserialize, Serialize};
 
-    use crate::solution::{ProtoHSolution, SolutionError};
+    use traits::{Protocol, SolutionError};
 
     /// Conforming Request object
     /// Used for deserializing JSON bytes received
@@ -143,7 +143,7 @@ mod prime_time {
     }
 
     #[async_trait]
-    impl ProtoHSolution for PrimeTimeSolution {
+    impl Protocol for PrimeTimeSolution {
         fn process_request(&mut self, line: &[u8]) -> Result<Vec<u8>, SolutionError> {
             // Construct a request from the u8 vec
             let req = Request::from_bytes(line);

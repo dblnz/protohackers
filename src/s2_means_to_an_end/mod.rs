@@ -3,7 +3,7 @@ pub use self::means_to_an_end::*;
 
 #[cfg(feature = "s2")]
 mod means_to_an_end {
-    use crate::solution::{ProtoHSolution, RequestDelimiter, SolutionError};
+    use traits::{Protocol, RequestDelimiter, SolutionError};
     use std::collections::HashMap;
 
     /// Means To An End
@@ -181,7 +181,7 @@ mod means_to_an_end {
         }
     }
 
-    impl ProtoHSolution for MeansToAnEndSolution {
+    impl Protocol for MeansToAnEndSolution {
         fn get_delimiter() -> RequestDelimiter {
             RequestDelimiter::NoOfBytes(9)
         }

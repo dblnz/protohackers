@@ -3,7 +3,7 @@ pub use self::smoke_test::*;
 
 #[cfg(feature = "s0")]
 mod smoke_test {
-    use crate::solution::{ProtoHSolution, SolutionError};
+    use traits::{Protocol, SolutionError};
 
     /// Smoke Test - TCP Echo Service
     ///
@@ -18,7 +18,7 @@ mod smoke_test {
         }
     }
 
-    impl ProtoHSolution for SmokeTestSolution {
+    impl Protocol for SmokeTestSolution {
         fn process_request(&mut self, line: &[u8]) -> Result<Vec<u8>, SolutionError> {
             Ok(line.to_vec())
         }
