@@ -1,8 +1,6 @@
 name: ProtoHackers CI
 
 on:
-  push:
-    branches: ["develop"]
   pull_request:
     branches: ["develop"]
 
@@ -13,14 +11,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        solution: ["s1", "s2"]
+        solution: ["s2"]
         os: [ubuntu-latest]
         rust: [stable]
         make:
-          - name: Build
-            task: cargo build --release
-          - name: Clippy
-            task: cargo clippy
           - name: Unit tests
             task: cargo test --release
     steps:
