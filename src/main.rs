@@ -8,20 +8,19 @@ use traits::{Protocol, SolutionError};
 
 cfg_if! {
     if #[cfg(feature = "s0")] {
-        mod s0_smoke_test;
         use s0_smoke_test::SmokeTestSolution;
         type Solution = SmokeTestSolution;
     } else if #[cfg(feature = "s1")] {
-        mod s1_prime_time;
         use s1_prime_time::PrimeTimeSolution;
         type Solution = PrimeTimeSolution;
     } else if #[cfg(feature = "s2")] {
-        mod s2_means_to_an_end;
         use s2_means_to_an_end::MeansToAnEndSolution;
         type Solution = MeansToAnEndSolution;
     }
     else {
-        compile_error!("Either feature \"s0\", \"s1\" or \"s2\" must be enabled for this app.");
+        // compile_error!("Either feature \"s0\", \"s1\" or \"s2\" must be enabled for this app.");
+        use s2_means_to_an_end::MeansToAnEndSolution;
+        type Solution = MeansToAnEndSolution;
     }
 }
 
