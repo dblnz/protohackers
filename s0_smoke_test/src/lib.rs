@@ -4,7 +4,7 @@ use traits::{Protocol, SolutionError};
 ///
 /// This Protocol implies replying to the requests with
 /// the same data received
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct SmokeTestSolution;
 
 impl SmokeTestSolution {
