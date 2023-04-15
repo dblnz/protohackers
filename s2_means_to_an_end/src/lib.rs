@@ -177,7 +177,7 @@ impl MeansToAnEndSolution {
 }
 
 impl Protocol for MeansToAnEndSolution {
-    fn get_delimiter() -> RequestDelimiter {
+    fn get_delimiter(&self) -> RequestDelimiter {
         RequestDelimiter::NoOfBytes(9)
     }
 

@@ -1,6 +1,5 @@
 use async_trait::async_trait;
-use std::marker::{Send, Sync};
-use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufStream};
+use std::marker::Sync;
 
 /// Custom Error type used to treat Solution specific errors
 #[derive(Debug, PartialEq)]

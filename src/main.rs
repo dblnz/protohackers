@@ -2,10 +2,8 @@
 
 use cfg_if::cfg_if;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-use tokio::net::{TcpListener, TcpStream};
 
-use serv
-use traits::{Protocol, SolutionError};
+use server::{Server, ServerErrorKind};
 
 cfg_if! {
     if #[cfg(feature = "s0")] {
@@ -29,14 +27,12 @@ const IP: Ipv4Addr = Ipv4Addr::new(0, 0, 0, 0);
 const PORT: u16 = 8080;
 
 #[tokio::main]
-async fn main() {
+async fn main() -> Result<(), ServerErrorKind> {
     let addr = SocketAddr::new(IpAddr::V4(IP), PORT);
 
-    let mut server = Server<Solution>::default();
-    
-    println!("Listening on {:?}:{:?}...", IP, PORT);
+    let mut server = Server::default();
 
-    server.bind(addr.to_string()).await;
-    server.listen().await;
+    server.bind(&addr.to_string()).await?;
+
+    server.listen::<Solution>().await
 }
-
