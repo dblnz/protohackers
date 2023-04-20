@@ -1,10 +1,9 @@
-use async_trait::async_trait;
 use std::marker::Sync;
 
 /// Custom Error type used to treat Solution specific errors
 #[derive(Debug, PartialEq)]
 pub enum SolutionError {
-    Request(Vec<u8>),
+    MalformedRequest(Vec<u8>),
     Read,
     Write,
 }
@@ -15,7 +14,6 @@ pub enum RequestDelimiter {
     NoOfBytes(usize),
 }
 
-#[async_trait]
 pub trait Protocol
     where
         Self: Sync {

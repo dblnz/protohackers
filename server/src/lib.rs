@@ -15,19 +15,6 @@ pub enum ServerErrorKind {
     WriteFail,
 }
 
-enum ServerState {
-    Idle,
-    Bound,
-    Listening,
-}
-
-enum ConnectionState {
-    Idle,
-    Reading,
-    Processing,
-    Writing,
-}
-
 pub struct Server {
     listener: Option<TcpListener>,
     state: Arc<Mutex<SharedState>>,
@@ -103,7 +90,6 @@ async fn process<T: Default + Protocol + Send + Sync>(
     let mut line = vec![];
     let mut should_continue = true;
     let mut _len = 0;
-    let mut _conn_state = ConnectionState::Idle;
 
     // Get address of peer
     let addr = stream
@@ -112,15 +98,13 @@ async fn process<T: Default + Protocol + Send + Sync>(
         .map_err(|_| SolutionError::Read)?;
 
     // Create a channel for the peer
-    let (tx, rx) = mpsc::unbounded_channel();
+    let (tx, _rx) = mpsc::unbounded_channel();
 
     // Add entry to this peer in the shared state
     state.lock().await.peers.insert(addr, tx);
 
     // Loop until no bytes are read
     while should_continue {
-        _conn_state = ConnectionState::Reading;
-
         // Read line - Return ReadError in case of fail
         let read_len = match solution.get_delimiter() {
             RequestDelimiter::UntilChar(del) => stream
@@ -138,12 +122,11 @@ async fn process<T: Default + Protocol + Send + Sync>(
 
         if read_len > 0 {
             _len += read_len;
-            _conn_state = ConnectionState::Processing;
 
             // Process the received request/line
             let response = match solution.process_request(&line) {
                 Ok(arr) => arr,
-                Err(SolutionError::Request(arr)) => {
+                Err(SolutionError::MalformedRequest(arr)) => {
                     // In case an error occures stop reading
                     should_continue = false;
                     arr
@@ -157,8 +140,6 @@ async fn process<T: Default + Protocol + Send + Sync>(
 
             // If there's something to send
             if !response.is_empty() {
-                _conn_state = ConnectionState::Writing;
-
                 // Send back the result
                 stream
                     .write_all(&response)
@@ -181,30 +162,6 @@ async fn process<T: Default + Protocol + Send + Sync>(
 /// Shorthand for the transmit half of the message channel.
 type Tx = mpsc::UnboundedSender<String>;
 
-/// Shorthand for the receive half of the message channel.
-type Rx = mpsc::UnboundedReceiver<String>;
-
-struct Peer {
-    stream: BufStream<TcpStream>,
-    rx: Rx,
-}
-
-impl Peer {
-    async fn new(
-        state: Arc<Mutex<SharedState>>,
-        stream: BufStream<TcpStream>,
-    ) -> std::io::Result<Peer> {
-        let addr = stream.get_ref().peer_addr()?;
-
-        let (tx, rx) = mpsc::unbounded_channel();
-
-        // Add entry to this peer in the shared state
-        state.lock().await.peers.insert(addr, tx);
-
-        Ok(Self { stream, rx })
-    }
-}
-
 struct SharedState {
     peers: HashMap<SocketAddr, Tx>,
 }
@@ -222,11 +179,11 @@ impl SharedState {
         Self::default()
     }
 
-    async fn send(&mut self, to: SocketAddr, from: SocketAddr, message: &[u8]) {
+    async fn send(&mut self, _to: SocketAddr, _from: SocketAddr, _message: &[u8]) {
         unimplemented!()
     }
 
-    async fn broadcast(&mut self, from: SocketAddr, message: &[u8]) {
+    async fn broadcast(&mut self, _from: SocketAddr, _message: &[u8]) {
         unimplemented!()
     }
 }
