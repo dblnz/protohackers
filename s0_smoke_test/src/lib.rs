@@ -8,12 +8,16 @@ use traits::{Protocol, SolutionError};
 pub struct SmokeTestSolution;
 
 impl SmokeTestSolution {
+    /// Constructor for the SmokeTestSolution
     pub fn new() -> Self {
-        Self
+        Self::default()
     }
 }
 
+/// Implementation of the Protocol trait for SmokeTestSolution
+/// This is where the custom logic for the solution is implemented
 impl Protocol for SmokeTestSolution {
+    /// Custom method to process each received request/line
     fn process_request(&mut self, line: &[u8]) -> Result<Vec<u8>, SolutionError> {
         Ok(line.to_vec())
     }

@@ -1,7 +1,5 @@
-use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-
-use traits::{Protocol, SolutionError};
+use traits::{Protocol, SolutionError, RequestDelimiter};
 
 /// Conforming Request object
 /// Used for deserializing JSON bytes received
@@ -10,6 +8,7 @@ struct ConformingReqObj {
     pub method: String,
     pub number: f64,
 }
+
 /// Conforming Response object
 /// Used for serializing JSON before sending
 #[derive(Debug, Deserialize, PartialEq, Serialize)]
@@ -36,6 +35,11 @@ enum Response {
 }
 
 impl Request {
+    /// Creates a `Request` from provided bytes
+    /// and verifies if it satisfies the solution conditions
+    ///
+    /// If it does, it returns a `Request::ConformingReq`
+    /// Otherwise, it returns a `Request::MalformedReq`
     fn from_bytes(line: &[u8]) -> Request {
         let obj = serde_json::from_slice::<ConformingReqObj>(line).ok();
 
@@ -51,43 +55,46 @@ impl Request {
         }
     }
 
+    /// Processes the request and returns a `Response`
     fn process(self) -> Response {
         match self {
             Request::ConformingReq { method, number } => Response::ConformingResp {
                 method,
-                prime: Request::is_prime(number),
+                prime: is_prime(number),
             },
             Request::MalformedReq => Response::MalformedResp,
-        }
-    }
-
-    fn is_prime(number: f64) -> bool {
-        let n = number;
-        let number = number as i64;
-        if n.fract() != 0.0 || number < 2 {
-            false
-        } else {
-            let end = f64::sqrt(number as f64) as i64;
-
-            !(2..=end).any(|n| number % n == 0)
         }
     }
 }
 
 impl Response {
+    /// Converts the response into bytes ready to be sent
     fn into_bytes(self) -> Vec<u8> {
         match self {
             Response::ConformingResp { method, prime } => {
                 let obj = ConformingRespObj { method, prime };
-
                 let mut res = serde_json::to_string(&obj).unwrap();
+
                 // Add newline
                 res.push('\n');
-
                 res.as_bytes().to_vec()
             }
             Response::MalformedResp => b"malformed\n".to_vec(),
         }
+    }
+}
+
+/// Checks if a number is prime
+fn is_prime(number: f64) -> bool {
+    let n = number;
+    let number = number as i64;
+
+    if n.fract() != 0.0 || number < 2 {
+        false
+    } else {
+        let end = f64::sqrt(number as f64) as i64;
+
+        !(2..=end).any(|n| number % n == 0)
     }
 }
 
@@ -128,17 +135,26 @@ impl Response {
 /// Whenever you receive a malformed request, send back a single malformed response, and disconnect the client.
 ///
 /// Make sure you can handle at least 5 simultaneous clients.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct PrimeTimeSolution;
 
+/// Implement the solution trait for the solution
 impl PrimeTimeSolution {
+    /// Create a new instance of the solution
     pub fn new() -> Self {
-        Self
+        Self::default()
     }
 }
 
-#[async_trait]
+/// Implement the protocol trait for the solution
+/// This is where the custom logic for the solution is implemented
 impl Protocol for PrimeTimeSolution {
+    /// The delimiter is a newline character
+    fn get_delimiter(&self) -> RequestDelimiter {
+        RequestDelimiter::UntilChar(b'\n')
+    }
+
+    /// Process a request and return a response
     fn process_request(&mut self, line: &[u8]) -> Result<Vec<u8>, SolutionError> {
         // Construct a request from the u8 vec
         let req = Request::from_bytes(line);
@@ -146,13 +162,11 @@ impl Protocol for PrimeTimeSolution {
         // Consume the request and construct a response
         let resp = req.process();
 
-        // Get a string from the response
+        // return an error if the response is malformed
+        // otherwise return the response
         match resp {
-            Response::ConformingResp {
-                method: _,
-                prime: _,
-            } => Ok(resp.into_bytes()),
-            Response::MalformedResp => Err(SolutionError::Request(resp.into_bytes())),
+            Response::ConformingResp { .. } => Ok(resp.into_bytes()),
+            Response::MalformedResp => Err(SolutionError::MalformedRequest(resp.into_bytes())),
         }
     }
 }
