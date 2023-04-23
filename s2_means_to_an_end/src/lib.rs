@@ -83,7 +83,7 @@ use std::collections::HashMap;
 ///
 /// In this example, "-->" denotes messages from the server to the client, and "<--" denotes messages from the client to the server.
 ///
-///     Hexadecimal:                 Decoded:
+/// ----Hexadecimal------------------Decoded------
 /// <-- 49 00 00 30 39 00 00 00 65   I 12345 101
 /// <-- 49 00 00 30 3a 00 00 00 66   I 12346 102
 /// <-- 49 00 00 30 3b 00 00 00 64   I 12347 100
@@ -113,6 +113,7 @@ enum MessageType {
 }
 
 impl MessageType {
+    /// Convert a byte array into a MessageType
     fn from_bytes(line: &[u8]) -> Option<MessageType> {
         if 9 == line.len() {
             let w1 = ((line[1] as i32) << 24)
@@ -137,25 +138,34 @@ impl MessageType {
     }
 }
 
-impl MeansToAnEndSolution {
-    pub fn new() -> Self {
+impl Default for MeansToAnEndSolution {
+    /// Create a new MeansToAnEndSolution
+    fn default() -> Self {
         Self { db: HashMap::new() }
     }
+}
 
+impl MeansToAnEndSolution {
+    /// Create a new MeansToAnEndSolution
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Insert a {timestapm: price} entry into the database
     fn insert(&mut self, ts: i32, price: i32) {
         self.db.insert(ts, price);
     }
 
+    /// Query the database for the mean price between min and max timestamps
     fn query(&self, min: i32, max: i32) -> Vec<u8> {
         let mut res = vec![0; 4];
-
         let mut sum = 0i64;
         let mut n = 0i64;
-
         let mut sorted = self.db.iter().collect::<Vec<(&i32, &i32)>>();
 
         sorted.sort_by(|a, b| b.0.cmp(a.0));
 
+        // Fold over the sorted vector, summing the prices and counting the number of entries
         (sum, n) = sorted.iter().fold((sum, n), |mut acc, item| {
             if *item.0 >= min && *item.0 <= max {
                 acc.0 += *item.1 as i64;
@@ -164,6 +174,7 @@ impl MeansToAnEndSolution {
             acc
         });
 
+        // Calculate the mean
         let mean = if n > 0 { (sum / n) as i32 } else { 0 };
 
         // Write into vec in LE order
@@ -176,11 +187,14 @@ impl MeansToAnEndSolution {
     }
 }
 
+/// Implement the Protocol trait for MeansToAnEndSolution
 impl Protocol for MeansToAnEndSolution {
+    /// Define the delimiter for the protocol as a 9 byte message
     fn get_delimiter(&self) -> RequestDelimiter {
         RequestDelimiter::NoOfBytes(9)
     }
 
+    /// Process a request
     fn process_request(&mut self, line: &[u8]) -> Result<Vec<u8>, SolutionError> {
         match MessageType::from_bytes(line) {
             Some(MessageType::Insert(ts, price)) => {
@@ -188,7 +202,7 @@ impl Protocol for MeansToAnEndSolution {
                 Ok(vec![])
             }
             Some(MessageType::Query(min, max)) => Ok(self.query(min, max)),
-            None => Err(SolutionError::Request(b"malformed".to_vec()))?,
+            None => Err(SolutionError::MalformedRequest(b"malformed".to_vec()))?,
         }
     }
 }

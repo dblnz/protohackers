@@ -5,6 +5,7 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
 use server::{Server, ServerErrorKind};
 
+// define Solution dependent on the feature enabled
 cfg_if! {
     if #[cfg(feature = "s0")] {
         use s0_smoke_test::SmokeTestSolution;
@@ -23,6 +24,7 @@ cfg_if! {
     }
 }
 
+// Define the IP and PORT to bind to
 const IP: Ipv4Addr = Ipv4Addr::new(0, 0, 0, 0);
 const PORT: u16 = 8080;
 
@@ -32,7 +34,9 @@ async fn main() -> Result<(), ServerErrorKind> {
 
     let mut server = Server::default();
 
+    // Bind the server to the address:port
     server.bind(&addr.to_string()).await?;
 
+    // Start listening for new connections
     server.listen::<Solution>().await
 }
