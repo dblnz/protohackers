@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use traits::{Protocol, SolutionError, RequestDelimiter};
+use server::{Protocol, SolutionError, RequestDelimiter};
 
 /// Conforming Request object
 /// Used for deserializing JSON bytes received

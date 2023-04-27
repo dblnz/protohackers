@@ -1,4 +1,4 @@
-use traits::{Protocol, RequestDelimiter, SolutionError};
+use server::{Protocol, RequestDelimiter, SolutionError};
 use std::collections::HashMap;
 
 /// Means To An End
