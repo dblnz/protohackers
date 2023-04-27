@@ -1,4 +1,4 @@
-use traits::{Protocol, SolutionError};
+use server::{Protocol, SolutionError};
 
 /// Smoke Test - TCP Echo Service
 ///

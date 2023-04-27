@@ -1,10 +1,41 @@
 use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::marker::Sync;
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufStream};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{mpsc, Mutex};
-use traits::{Protocol, RequestDelimiter, SolutionError};
+
+/// Custom Error type used to treat Solution specific errors
+#[derive(Debug, PartialEq)]
+pub enum SolutionError {
+    MalformedRequest(Vec<u8>),
+    Read,
+    Write,
+}
+
+#[derive(Debug)]
+pub enum RequestDelimiter {
+    UntilChar(u8),
+    NoOfBytes(usize),
+}
+
+pub trait Protocol
+    where
+        Self: Sync {
+    /// Static method to get the delimiter between two requests
+    /// This should be statically defined by each Custom solution
+    ///
+    /// The default implementation sets newline as the delimiter
+    fn get_delimiter(&self) -> RequestDelimiter {
+        // Return newline
+        RequestDelimiter::UntilChar(b'\n')
+    }
+
+    /// Custom method to process each received request/line
+    fn process_request(&mut self, line: &[u8]) -> Result<Vec<u8>, SolutionError>;
+}
+
 
 /// Error type that is returned by the `SolutionServer`
 #[derive(Debug)]
@@ -46,7 +77,7 @@ impl Server {
     /// Method that puts the server in listening mode that
     /// takes in new connections, reads requests and responds
     /// to them accordingly
-    pub async fn listen<T: Default + traits::Protocol + Send + Sync>(
+    pub async fn listen<T: Default + Protocol + Send + Sync>(
         &mut self,
     ) -> Result<(), ServerErrorKind> {
         if let Some(l) = self.listener.as_ref() {

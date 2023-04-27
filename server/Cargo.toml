@@ -8,4 +8,3 @@ edition = "2021"
 [dependencies]
 async-trait = "0.1.68"
 tokio = { version = "1.27.0", features = ["full"] }
-traits = { version = "0.1.0", path = "../traits" }
