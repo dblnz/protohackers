@@ -1,4 +1,4 @@
-use server::{Protocol, RequestDelimiter, SolutionError};
+use server::{Action, Protocol, RequestDelimiter, SolutionError};
 use std::collections::HashMap;
 
 /// Means To An End
@@ -195,13 +195,13 @@ impl Protocol for MeansToAnEndSolution {
     }
 
     /// Process a request
-    fn process_request(&mut self, line: &[u8]) -> Result<Vec<u8>, SolutionError> {
+    fn process_request(&mut self, line: &[u8]) -> Result<Action, SolutionError> {
         match MessageType::from_bytes(line) {
             Some(MessageType::Insert(ts, price)) => {
                 self.insert(ts, price);
-                Ok(vec![])
+                Ok(Action::Reply(vec![]))
             }
-            Some(MessageType::Query(min, max)) => Ok(self.query(min, max)),
+            Some(MessageType::Query(min, max)) => Ok(Action::Reply(self.query(min, max))),
             None => Err(SolutionError::MalformedRequest(b"malformed".to_vec()))?,
         }
     }
@@ -237,13 +237,13 @@ mod test {
         let line_3 = vec![0x49, 0x00, 0x00, 0xA0, 0x00, 0x00, 0x00, 0x00, 0x05];
         let line_4 = vec![0x51, 0x00, 0x00, 0x30, 0x00, 0x00, 0x00, 0x40, 0x00];
 
-        assert_eq!(sol.process_request(&line_0), Ok(vec![]));
-        assert_eq!(sol.process_request(&line_1), Ok(vec![]));
-        assert_eq!(sol.process_request(&line_2), Ok(vec![]));
-        assert_eq!(sol.process_request(&line_3), Ok(vec![]));
+        assert_eq!(sol.process_request(&line_0), Ok(Action::Reply(vec![])));
+        assert_eq!(sol.process_request(&line_1), Ok(Action::Reply(vec![])));
+        assert_eq!(sol.process_request(&line_2), Ok(Action::Reply(vec![])));
+        assert_eq!(sol.process_request(&line_3), Ok(Action::Reply(vec![])));
         assert_eq!(
             sol.process_request(&line_4),
-            Ok(vec![0x00, 0x00, 0x00, 0x65])
+            Ok(Action::Reply(vec![0x00, 0x00, 0x00, 0x65]))
         );
     }
 
