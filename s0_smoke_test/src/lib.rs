@@ -1,4 +1,4 @@
-use server::{Protocol, SolutionError};
+use server::{Action, Protocol, SolutionError};
 
 /// Smoke Test - TCP Echo Service
 ///
@@ -18,8 +18,8 @@ impl SmokeTestSolution {
 /// This is where the custom logic for the solution is implemented
 impl Protocol for SmokeTestSolution {
     /// Custom method to process each received request/line
-    fn process_request(&mut self, line: &[u8]) -> Result<Vec<u8>, SolutionError> {
-        Ok(line.to_vec())
+    fn process_request(&mut self, line: &[u8]) -> Result<Action, SolutionError> {
+        Ok(Action::Reply(line.to_vec()))
     }
 }
 

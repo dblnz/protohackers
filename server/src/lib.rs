@@ -33,9 +33,16 @@ pub trait Protocol
     }
 
     /// Custom method to process each received request/line
-    fn process_request(&mut self, line: &[u8]) -> Result<Vec<u8>, SolutionError>;
+    fn process_request(&mut self, line: &[u8]) -> Result<Action, SolutionError>;
 }
 
+/// Custom Action type that is returned by the `Protocol`
+///
+/// This is used to define the action to be taken by the server
+#[derive(Debug, PartialEq)]
+pub enum Action {
+    Reply(Vec<u8>),
+}
 
 /// Error type that is returned by the `SolutionServer`
 #[derive(Debug)]
@@ -156,13 +163,13 @@ async fn process<T: Default + Protocol + Send + Sync>(
 
             // Process the received request/line
             let response = match solution.process_request(&line) {
-                Ok(arr) => arr,
+                Ok(Action::Reply(arr)) => arr,
                 Err(SolutionError::MalformedRequest(arr)) => {
                     // In case an error occures stop reading
                     should_continue = false;
                     arr
                 }
-                _ => {
+                Err(_) => {
                     // In case an error occures stop reading
                     should_continue = false;
                     vec![]

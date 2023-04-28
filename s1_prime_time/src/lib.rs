@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use server::{Protocol, SolutionError, RequestDelimiter};
+use server::{Action, Protocol, SolutionError, RequestDelimiter};
 
 /// Conforming Request object
 /// Used for deserializing JSON bytes received
@@ -155,7 +155,7 @@ impl Protocol for PrimeTimeSolution {
     }
 
     /// Process a request and return a response
-    fn process_request(&mut self, line: &[u8]) -> Result<Vec<u8>, SolutionError> {
+    fn process_request(&mut self, line: &[u8]) -> Result<Action, SolutionError> {
         // Construct a request from the u8 vec
         let req = Request::from_bytes(line);
 
@@ -165,7 +165,7 @@ impl Protocol for PrimeTimeSolution {
         // return an error if the response is malformed
         // otherwise return the response
         match resp {
-            Response::ConformingResp { .. } => Ok(resp.into_bytes()),
+            Response::ConformingResp { .. } => Ok(Action::Reply(resp.into_bytes())),
             Response::MalformedResp => Err(SolutionError::MalformedRequest(resp.into_bytes())),
         }
     }
