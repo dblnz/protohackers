@@ -113,6 +113,27 @@ impl Server {
     }
 }
 
+async fn read(stream: &mut BufStream<TcpStream>, line: &mut Vec<u8>, delimiter: RequestDelimiter) -> Result<usize, SolutionError> {
+    let mut len = 0;
+    let mut line = line;
+
+    match delimiter {
+        RequestDelimiter::UntilChar(del) => {
+            len = stream.read_until(del, &mut line).await.map_err(|_| SolutionError::Read)?;
+        }
+        RequestDelimiter::NoOfBytes(n) => {
+            *line = vec![0; n];
+            len = stream.read_exact(&mut line).await.map_err(|_| SolutionError::Read)?;
+        }
+    }
+
+    if len > 0 {
+        Ok(len)
+    } else {
+        Err(SolutionError::Read)
+    }
+}
+
 /// Processes a connection
 ///
 /// Returns a `Result` which contains the number of processed bytes on the
@@ -138,75 +159,84 @@ async fn process<T: Default + Protocol + Send + Sync>(
         .map_err(|_| SolutionError::Read)?;
 
     // Create a channel for the peer
-    let (tx, _rx) = mpsc::unbounded_channel();
+    let (tx, mut rx) = mpsc::unbounded_channel::<Vec<u8>>();
 
     // Add entry to this peer in the shared state
     state.lock().await.peers.insert(addr, tx);
 
     // Loop until no bytes are read
     while should_continue {
-        // Read line - Return ReadError in case of fail
-        let read_len = match solution.get_delimiter() {
-            RequestDelimiter::UntilChar(del) => stream
-                .read_until(del, &mut line)
-                .await
-                .map_err(|_| SolutionError::Read)?,
-            RequestDelimiter::NoOfBytes(n) => {
-                line = vec![0; n];
-                stream
-                    .read_exact(&mut line)
-                    .await
-                    .map_err(|_| SolutionError::Read)?
+        // Wait for messages from other peers or parse the received request
+        tokio::select! {
+            Some(msg) = rx.recv() => {
+                println!("rx got {:?}", msg);
+    
+                // If there's something to send
+                if !msg.is_empty() {
+                    // Send back the result
+                    stream
+                        .write_all(&msg)
+                        .await
+                        .map_err(|_| SolutionError::Write)?;
+        
+                    // Flush the buffer to ensure it is sent
+                    stream.flush().await.map_err(|_| SolutionError::Write)?;
+                }
             }
-        };
-
-        if read_len > 0 {
-            _len += read_len;
-
-            // Process the received request/line
-            let response = match solution.process_request(&line) {
-                Ok(Action::Reply(arr)) => arr,
-                Ok(Action::Send(addr, arr)) => {
-                    unimplemented!()
-                }
-                Ok(Action::Broadcast(arr)) => {
-                    unimplemented!()
-                }
-                Err(SolutionError::MalformedRequest(arr)) => {
-                    // In case an error occures stop reading
+            result = read(&mut stream, &mut line, solution.get_delimiter()) => {
+                println!("read from stream {:?}", result);
+                // TODO: Handle error
+                let read_len = result.unwrap();
+                if read_len > 0 {
+                    _len += read_len;
+            
+                    // Process the received request/line
+                    let response = match solution.process_request(&line) {
+                        Ok(Action::Reply(arr)) => arr,
+                        Ok(Action::Send(addr, arr)) => {
+                            unimplemented!()
+                        }
+                        Ok(Action::Broadcast(arr)) => {
+                            state.lock().await.broadcast(addr, arr.as_slice()).await;
+                            vec![]
+                        }
+                        Err(SolutionError::MalformedRequest(arr)) => {
+                            // In case an error occures stop reading
+                            should_continue = false;
+                            arr
+                        }
+                        Err(_) => {
+                            // In case an error occures stop reading
+                            should_continue = false;
+                            vec![]
+                        }
+                    };
+            
+                    // If there's something to send
+                    if !response.is_empty() {
+                        // Send back the result
+                        stream
+                            .write_all(&response)
+                            .await
+                            .map_err(|_| SolutionError::Write)?;
+            
+                        // Flush the buffer to ensure it is sent
+                        stream.flush().await.map_err(|_| SolutionError::Write)?;
+                    }
+                } else {
                     should_continue = false;
-                    arr
                 }
-                Err(_) => {
-                    // In case an error occures stop reading
-                    should_continue = false;
-                    vec![]
-                }
-            };
-
-            // If there's something to send
-            if !response.is_empty() {
-                // Send back the result
-                stream
-                    .write_all(&response)
-                    .await
-                    .map_err(|_| SolutionError::Write)?;
-
-                // Flush the buffer to ensure it is sent
-                stream.flush().await.map_err(|_| SolutionError::Write)?;
+            
+                line.clear();
             }
-        } else {
-            should_continue = false;
         }
-
-        line.clear();
     }
 
     Ok(())
 }
 
 /// Shorthand for the transmit half of the message channel.
-type Tx = mpsc::UnboundedSender<String>;
+type Tx = mpsc::UnboundedSender<Vec<u8>>;
 
 struct SharedState {
     peers: HashMap<SocketAddr, Tx>,
@@ -229,8 +259,12 @@ impl SharedState {
         unimplemented!()
     }
 
-    async fn broadcast(&mut self, _from: SocketAddr, _message: &[u8]) {
-        unimplemented!()
+    async fn broadcast(&mut self, from: SocketAddr, message: &[u8]) {
+        for peer in self.peers.iter_mut() {
+            if *peer.0 != from {
+                let _ = peer.1.send(message.into());
+            }
+        }
     }
 }
 
