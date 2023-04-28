@@ -42,6 +42,8 @@ pub trait Protocol
 #[derive(Debug, PartialEq)]
 pub enum Action {
     Reply(Vec<u8>),
+    Send(SocketAddr, Vec<u8>),
+    Broadcast(Vec<u8>),
 }
 
 /// Error type that is returned by the `SolutionServer`
@@ -164,6 +166,12 @@ async fn process<T: Default + Protocol + Send + Sync>(
             // Process the received request/line
             let response = match solution.process_request(&line) {
                 Ok(Action::Reply(arr)) => arr,
+                Ok(Action::Send(addr, arr)) => {
+                    unimplemented!()
+                }
+                Ok(Action::Broadcast(arr)) => {
+                    unimplemented!()
+                }
                 Err(SolutionError::MalformedRequest(arr)) => {
                     // In case an error occures stop reading
                     should_continue = false;
