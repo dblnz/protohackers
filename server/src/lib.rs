@@ -1,6 +1,6 @@
 use std::collections::HashMap;
-use std::net::SocketAddr;
 use std::marker::Sync;
+use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufStream};
 use tokio::net::{TcpListener, TcpStream};
@@ -21,8 +21,9 @@ pub enum RequestDelimiter {
 }
 
 pub trait Protocol
-    where
-        Self: Sync {
+where
+    Self: Sync,
+{
     /// Static method to get the delimiter between two requests
     /// This should be statically defined by each Custom solution
     ///
@@ -32,8 +33,19 @@ pub trait Protocol
         RequestDelimiter::UntilChar(b'\n')
     }
 
+    /// Default welcome method that does nothing
+    /// This can be overridden by each Custom solution
+    fn welcome(&self) -> Option<Vec<u8>> {
+        None
+    }
+
     /// Custom method to process each received request/line
     fn process_request(&mut self, line: &[u8]) -> Result<Action, SolutionError>;
+
+    /// Custom method to process each received peer message
+    fn process_peer_msg(&mut self, _line: &[u8]) -> Result<Action, SolutionError> {
+        unimplemented!("process_peer_msg not implemented: {:?}", _line)
+    }
 }
 
 /// Custom Action type that is returned by the `Protocol`
@@ -41,9 +53,10 @@ pub trait Protocol
 /// This is used to define the action to be taken by the server
 #[derive(Debug, PartialEq)]
 pub enum Action {
+    Broadcast(Vec<u8>),
+    Disconnect(Vec<u8>),
     Reply(Vec<u8>),
     Send(SocketAddr, Vec<u8>),
-    Broadcast(Vec<u8>),
 }
 
 /// Error type that is returned by the `SolutionServer`
@@ -64,7 +77,7 @@ impl Default for Server {
     fn default() -> Self {
         Self {
             listener: None,
-            state: Arc::new(Mutex::new(SharedState::default())),
+            state: Arc::new(Mutex::new(SharedState::new())),
         }
     }
 }
@@ -113,19 +126,29 @@ impl Server {
     }
 }
 
-async fn read(stream: &mut BufStream<TcpStream>, line: &mut Vec<u8>, delimiter: RequestDelimiter) -> Result<usize, SolutionError> {
-    let mut len = 0;
+/// This is needed to avoid the fact that the types of
+/// `read_until` and `read_exact` are different
+/// So we need to have a common function that can be used
+async fn read_until_del(
+    stream: &mut BufStream<TcpStream>,
+    line: &mut Vec<u8>,
+    delimiter: RequestDelimiter,
+) -> Result<usize, SolutionError> {
     let mut line = line;
 
-    match delimiter {
-        RequestDelimiter::UntilChar(del) => {
-            len = stream.read_until(del, &mut line).await.map_err(|_| SolutionError::Read)?;
-        }
+    let len = match delimiter {
+        RequestDelimiter::UntilChar(del) => stream
+            .read_until(del, &mut line)
+            .await
+            .map_err(|_| SolutionError::Read)?,
         RequestDelimiter::NoOfBytes(n) => {
             *line = vec![0; n];
-            len = stream.read_exact(&mut line).await.map_err(|_| SolutionError::Read)?;
+            stream
+                .read_exact(&mut line)
+                .await
+                .map_err(|_| SolutionError::Read)?
         }
-    }
+    };
 
     if len > 0 {
         Ok(len)
@@ -134,13 +157,35 @@ async fn read(stream: &mut BufStream<TcpStream>, line: &mut Vec<u8>, delimiter: 
     }
 }
 
+/// This function welcomes a new client
+///
+/// This is solution specific, it might not send a
+/// message after all
+async fn welcome_client<T>(
+    solution: &mut T,
+    stream: &mut BufStream<TcpStream>,
+) -> Result<(), SolutionError>
+where
+    T: Default + Protocol + Send + Sync,
+{
+    if let Some(msg) = solution.welcome() {
+        if !msg.is_empty() {
+            stream
+                .write_all(msg.as_slice())
+                .await
+                .map_err(|_| SolutionError::Write)?;
+
+            stream.flush().await.map_err(|_| SolutionError::Write)?;
+        }
+    }
+
+    Ok(())
+}
+
 /// Processes a connection
 ///
 /// Returns a `Result` which contains the number of processed bytes on the
 /// success path and a custom defined error `SolutionError`
-///
-/// TODO: Modify -> This method can be customly implemented for a new solution to produce
-/// requests in a different way(e.g. multi line)
 async fn process<T: Default + Protocol + Send + Sync>(
     state: Arc<Mutex<SharedState>>,
     solution: T,
@@ -150,7 +195,6 @@ async fn process<T: Default + Protocol + Send + Sync>(
     let mut stream = BufStream::new(stream);
     let mut line = vec![];
     let mut should_continue = true;
-    let mut _len = 0;
 
     // Get address of peer
     let addr = stream
@@ -164,40 +208,72 @@ async fn process<T: Default + Protocol + Send + Sync>(
     // Add entry to this peer in the shared state
     state.lock().await.peers.insert(addr, tx);
 
+    // Send welcome message to the peer
+    welcome_client(&mut solution, &mut stream).await?;
+
     // Loop until no bytes are read
     while should_continue {
         // Wait for messages from other peers or parse the received request
         tokio::select! {
+            // If there's a message from another peer
             Some(msg) = rx.recv() => {
-                println!("rx got {:?}", msg);
-    
+                // Process the received peer message
+                let response = match solution.process_peer_msg(&msg) {
+                    Ok(Action::Broadcast(arr)) => {
+                        state.lock().await.broadcast(addr, arr.as_slice()).await;
+                        vec![]
+                    }
+                    Ok(Action::Disconnect(arr)) => {
+                        should_continue = false;
+                        arr
+                    }
+                    Ok(Action::Reply(arr)) => arr,
+                    Ok(Action::Send(to, arr)) => {
+                        state.lock().await.send(to, addr, arr.as_slice()).await;
+                        vec![]
+                    }
+                    Err(SolutionError::MalformedRequest(arr)) => {
+                        // In case an error occures stop reading
+                        should_continue = false;
+                        arr
+                    }
+                    Err(_) => {
+                        // In case an error occures stop reading
+                        should_continue = false;
+                        vec![]
+                    }
+                };
+
                 // If there's something to send
-                if !msg.is_empty() {
+                if !response.is_empty() {
                     // Send back the result
                     stream
-                        .write_all(&msg)
+                        .write_all(&response)
                         .await
                         .map_err(|_| SolutionError::Write)?;
-        
+
                     // Flush the buffer to ensure it is sent
                     stream.flush().await.map_err(|_| SolutionError::Write)?;
                 }
             }
-            result = read(&mut stream, &mut line, solution.get_delimiter()) => {
-                println!("read from stream {:?}", result);
-                // TODO: Handle error
-                let read_len = result.unwrap();
+            // If there's a request incoming
+            result = read_until_del(&mut stream, &mut line, solution.get_delimiter()) => {
+                let read_len = result?;
+
                 if read_len > 0 {
-                    _len += read_len;
-            
                     // Process the received request/line
                     let response = match solution.process_request(&line) {
-                        Ok(Action::Reply(arr)) => arr,
-                        Ok(Action::Send(addr, arr)) => {
-                            unimplemented!()
-                        }
                         Ok(Action::Broadcast(arr)) => {
                             state.lock().await.broadcast(addr, arr.as_slice()).await;
+                            vec![]
+                        }
+                        Ok(Action::Disconnect(arr)) => {
+                            should_continue = false;
+                            arr
+                        }
+                        Ok(Action::Reply(arr)) => arr,
+                        Ok(Action::Send(to, arr)) => {
+                            state.lock().await.send(to, addr, arr.as_slice()).await;
                             vec![]
                         }
                         Err(SolutionError::MalformedRequest(arr)) => {
@@ -211,7 +287,7 @@ async fn process<T: Default + Protocol + Send + Sync>(
                             vec![]
                         }
                     };
-            
+
                     // If there's something to send
                     if !response.is_empty() {
                         // Send back the result
@@ -219,14 +295,14 @@ async fn process<T: Default + Protocol + Send + Sync>(
                             .write_all(&response)
                             .await
                             .map_err(|_| SolutionError::Write)?;
-            
+
                         // Flush the buffer to ensure it is sent
                         stream.flush().await.map_err(|_| SolutionError::Write)?;
                     }
                 } else {
                     should_continue = false;
                 }
-            
+
                 line.clear();
             }
         }

@@ -22,4 +22,3 @@ impl Protocol for SmokeTestSolution {
         Ok(Action::Reply(line.to_vec()))
     }
 }
-
