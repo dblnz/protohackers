@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use server::{Action, Protocol, SolutionError, RequestDelimiter};
+use server::{Action, Protocol, RequestDelimiter, SolutionError};
 
 /// Conforming Request object
 /// Used for deserializing JSON bytes received
@@ -525,4 +525,3 @@ mod test {
         );
     }
 }
-

@@ -22,8 +22,8 @@ cfg_if! {
     }
     else {
         // compile_error!("Either feature \"s0\", \"s1\" or \"s2\" must be enabled for this app.");
-        use s2_means_to_an_end::MeansToAnEndSolution;
-        type Solution = MeansToAnEndSolution;
+        use s3_budget_chat::BudgetChatSolution;
+        type Solution = BudgetChatSolution;
     }
 }
 
