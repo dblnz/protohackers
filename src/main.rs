@@ -8,22 +8,22 @@ use server::{Server, ServerErrorKind};
 // define Solution dependent on the feature enabled
 cfg_if! {
     if #[cfg(feature = "s0")] {
-        use s0_smoke_test::SmokeTestSolution;
-        type Solution = SmokeTestSolution;
+        use s0_smoke_test::SmokeTestServer;
+        type ServerSol = SmokeTestServer;
     } else if #[cfg(feature = "s1")] {
-        use s1_prime_time::PrimeTimeSolution;
-        type Solution = PrimeTimeSolution;
+        use s1_prime_time::PrimeTimeServer;
+        type ServerSol = PrimeTimeServer;
     } else if #[cfg(feature = "s2")] {
-        use s2_means_to_an_end::MeansToAnEndSolution;
-        type Solution = MeansToAnEndSolution;
+        use s2_means_to_an_end::MeansToAnEndServer;
+        type ServerSol = MeansToAnEndServer;
     } else if #[cfg(feature = "s3")] {
-        use s3_budget_chat::BudgetChatSolution;
-        type Solution = BudgetChatSolution;
+        use s3_budget_chat::BudgetChatServer;
+        type ServerSol = BudgetChatServer;
     }
     else {
         // compile_error!("Either feature \"s0\", \"s1\" or \"s2\" must be enabled for this app.");
-        use s3_budget_chat::BudgetChatSolution;
-        type Solution = BudgetChatSolution;
+        use s3_budget_chat::BudgetChatServer;
+        type ServerSol = BudgetChatServer;
     }
 }
 
@@ -35,11 +35,11 @@ const PORT: u16 = 8080;
 async fn main() -> Result<(), ServerErrorKind> {
     let addr = SocketAddr::new(IpAddr::V4(IP), PORT);
 
-    let mut server = Server::default();
+    let mut server = ServerSol::default();
 
     // Bind the server to the address:port
     server.bind(&addr.to_string()).await?;
 
     // Start listening for new connections
-    server.listen::<Solution>().await
+    server.listen().await
 }
