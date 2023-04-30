@@ -1,4 +1,9 @@
-use server::{Action, Protocol, RequestDelimiter, SolutionError};
+use async_trait::async_trait;
+
+use server::{Server, ServerErrorKind};
+use tokio::io::{AsyncReadExt, AsyncWriteExt, BufStream};
+use tokio::net::{TcpListener, TcpStream};
+
 use std::collections::HashMap;
 
 /// Means To An End
@@ -101,9 +106,98 @@ use std::collections::HashMap;
 ///
 /// Where a client triggers undefined behaviour, the server can do anything it likes for that client,
 /// but must not adversely affect other clients that did not trigger undefined behaviour.
-#[derive(Debug)]
-pub struct MeansToAnEndSolution {
-    db: HashMap<i32, i32>,
+#[derive(Debug, Default)]
+pub struct MeansToAnEndServer {
+    listener: Option<TcpListener>,
+}
+
+#[async_trait]
+impl Server for MeansToAnEndServer {
+    /// Method that binds a server to the address:port given
+    async fn bind(&mut self, addr: &str) -> Result<(), ServerErrorKind> {
+        self.listener = Some(
+            TcpListener::bind(addr)
+                .await
+                .map_err(|_| ServerErrorKind::BindFail)?,
+        );
+
+        println!("Listening on {:?}", addr);
+
+        Ok(())
+    }
+
+    /// Method that puts the server in listening mode that
+    /// takes in new connections, reads requests and responds
+    /// to them accordingly
+    async fn listen(&mut self) -> Result<(), ServerErrorKind> {
+        if let Some(l) = self.listener.as_ref() {
+            loop {
+                println!("Waiting for connection ...");
+
+                // The second item contains the IP and port of the new connection.
+                let (socket, _) = l.accept().await.unwrap();
+
+                println!("Connection open\n");
+
+                // A new task is spawned for each inbound socket. The socket is
+                // moved to the new task and processed there.
+                tokio::spawn(async move { process(socket).await });
+            }
+        } else {
+            Err(ServerErrorKind::NotBound)
+        }
+    }
+}
+
+/// Processes a connection
+///
+/// Returns a `Result` which is empty on the success path and
+/// contains a `ServerErrorKind` on the error path
+async fn process(stream: TcpStream) -> Result<(), ServerErrorKind> {
+    let mut stream = BufStream::new(stream);
+    let mut line = vec![0; 9];
+    let mut should_continue = true;
+    let mut db = MeansToAnEndDB::default();
+
+    while should_continue {
+        let read_len = stream
+            .read_exact(&mut line)
+            .await
+            .map_err(|_| ServerErrorKind::ReadFail)?;
+
+        if read_len > 0 {
+            // Process the received request/line
+            let response = match MessageType::from_bytes(&line) {
+                Some(MessageType::Insert(ts, price)) => {
+                    db.insert(ts, price);
+                    vec![]
+                }
+                Some(MessageType::Query(min, max)) => db.query(min, max),
+                None => b"malformed".to_vec(),
+            };
+
+            // If there's something to send
+            if !response.is_empty() {
+                // Send back the result
+                stream
+                    .write_all(&response)
+                    .await
+                    .map_err(|_| ServerErrorKind::WriteFail)?;
+
+                // Flush the buffer to ensure it is sent
+                stream
+                    .flush()
+                    .await
+                    .map_err(|_| ServerErrorKind::WriteFail)?;
+            }
+        } else {
+            should_continue = false;
+        }
+
+        line.clear();
+    }
+
+    Ok(())
 }
 
 #[derive(Debug, PartialEq)]
@@ -138,19 +232,12 @@ impl MessageType {
     }
 }
 
-impl Default for MeansToAnEndSolution {
-    /// Create a new MeansToAnEndSolution
-    fn default() -> Self {
-        Self { db: HashMap::new() }
-    }
+#[derive(Debug, Default)]
+struct MeansToAnEndDB {
+    db: HashMap<i32, i32>,
 }
 
-impl MeansToAnEndSolution {
-    /// Create a new MeansToAnEndSolution
-    pub fn new() -> Self {
-        Self::default()
-    }
-
+impl MeansToAnEndDB {
     /// Insert a {timestapm: price} entry into the database
     fn insert(&mut self, ts: i32, price: i32) {
         self.db.insert(ts, price);
@@ -184,26 +271,6 @@ impl MeansToAnEndSolution {
         res[0] = (mean >> 24) as u8;
 
         res
-    }
-}
-
-/// Implement the Protocol trait for MeansToAnEndSolution
-impl Protocol for MeansToAnEndSolution {
-    /// Define the delimiter for the protocol as a 9 byte message
-    fn get_delimiter(&self) -> RequestDelimiter {
-        RequestDelimiter::NoOfBytes(9)
-    }
-
-    /// Process a request
-    fn process_request(&mut self, line: &[u8]) -> Result<Action, SolutionError> {
-        match MessageType::from_bytes(line) {
-            Some(MessageType::Insert(ts, price)) => {
-                self.insert(ts, price);
-                Ok(Action::Reply(vec![]))
-            }
-            Some(MessageType::Query(min, max)) => Ok(Action::Reply(self.query(min, max))),
-            None => Err(SolutionError::MalformedRequest(b"malformed".to_vec()))?,
-        }
     }
 }
 

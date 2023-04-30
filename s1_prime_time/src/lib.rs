@@ -1,5 +1,144 @@
+use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use server::{Action, Protocol, RequestDelimiter, SolutionError};
+use server::{Server, ServerErrorKind};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufStream};
+use tokio::net::{TcpListener, TcpStream};
+
+/// Prime Time
+///
+/// This Service receives JSON Formatted objects that specify a number to
+/// be checked if is prime
+///
+/// A conforming request object has the required field method,
+/// which must always contain the string `isPrime`, and the required field number,
+/// which must contain a number.
+/// Any JSON number is a valid number, including floating-point values.
+///
+/// Input Example:
+/// `{"method":"isPrime","number":123}`
+///
+/// A request is malformed if it is not a well-formed JSON object,
+/// if any required field is missing, if the method name is not `isPrime`,
+/// or if the number value is not a number.
+///
+/// Extraneous fields are to be ignored.
+///
+/// A conforming response object has the required field method,
+/// which must always contain the string `isPrime`, and the required field prime,
+/// which must contain a boolean value: true if the number in the request was prime,
+/// false if it was not.
+///
+/// Output Example:
+///  `{"method":"isPrime","prime":false}`
+///
+/// A response is malformed if it is not a well-formed JSON object, if any required field is missing,
+/// if the method name is not `isPrime`, or if the prime value is not a boolean.
+///
+/// Accept TCP connections.
+///
+/// Whenever you receive a conforming request, send back a correct response, and wait for another request.
+///
+/// Whenever you receive a malformed request, send back a single malformed response, and disconnect the client.
+///
+/// Make sure you can handle at least 5 simultaneous clients.
+#[derive(Debug, Default)]
+pub struct PrimeTimeServer {
+    listener: Option<TcpListener>,
+}
+
+#[async_trait]
+impl Server for PrimeTimeServer {
+    /// Method that binds a server to the address:port given
+    async fn bind(&mut self, addr: &str) -> Result<(), ServerErrorKind> {
+        self.listener = Some(
+            TcpListener::bind(addr)
+                .await
+                .map_err(|_| ServerErrorKind::BindFail)?,
+        );
+
+        println!("Listening on {:?}", addr);
+
+        Ok(())
+    }
+
+    /// Method that puts the server in listening mode that
+    /// takes in new connections, reads requests and responds
+    /// to them accordingly
+    async fn listen(&mut self) -> Result<(), ServerErrorKind> {
+        if let Some(l) = self.listener.as_ref() {
+            loop {
+                println!("Waiting for connection ...");
+
+                // The second item contains the IP and port of the new connection.
+                let (socket, _) = l.accept().await.unwrap();
+
+                println!("Connection open\n");
+
+                // A new task is spawned for each inbound socket. The socket is
+                // moved to the new task and processed there.
+                tokio::spawn(async move { process(socket).await });
+            }
+        } else {
+            Err(ServerErrorKind::NotBound)
+        }
+    }
+}
+
+/// Processes a connection
+///
+/// Returns a `Result` which is empty on the success path and
+/// contains a `ServerErrorKind` on the error path
+async fn process(stream: TcpStream) -> Result<(), ServerErrorKind> {
+    let mut stream = BufStream::new(stream);
+    let mut line = vec![];
+    let mut should_continue = true;
+
+    while should_continue {
+        let read_len = stream
+            .read_until(b'\n', &mut line)
+            .await
+            .map_err(|_| ServerErrorKind::ReadFail)?;
+
+        if read_len > 0 {
+            // Construct a request from the u8 vec
+            let req = Request::from_bytes(line.as_slice());
+
+            // Consume the request and construct a response
+            let resp = req.process();
+
+            // return an error if the response is malformed
+            // otherwise return the response
+            let response = match resp {
+                Response::ConformingResp { .. } => resp.into_bytes(),
+                Response::MalformedResp => {
+                    should_continue = false;
+                    resp.into_bytes()
+                }
+            };
+
+            // If there's something to send
+            if !response.is_empty() {
+                // Send back the result
+                stream
+                    .write_all(&response)
+                    .await
+                    .map_err(|_| ServerErrorKind::WriteFail)?;
+
+                // Flush the buffer to ensure it is sent
+                stream
+                    .flush()
+                    .await
+                    .map_err(|_| ServerErrorKind::WriteFail)?;
+            }
+        } else {
+            should_continue = false;
+        }
+
+        line.clear();
+    }
+
+    Ok(())
+}
 
 /// Conforming Request object
 /// Used for deserializing JSON bytes received
@@ -95,79 +234,6 @@ fn is_prime(number: f64) -> bool {
         let end = f64::sqrt(number as f64) as i64;
 
         !(2..=end).any(|n| number % n == 0)
-    }
-}
-
-/// Prime Time
-///
-/// This Service receives JSON Formatted objects that specify a number to
-/// be checked if is prime
-///
-/// A conforming request object has the required field method,
-/// which must always contain the string `isPrime`, and the required field number,
-/// which must contain a number.
-/// Any JSON number is a valid number, including floating-point values.
-///
-/// Input Example:
-/// `{"method":"isPrime","number":123}`
-///
-/// A request is malformed if it is not a well-formed JSON object,
-/// if any required field is missing, if the method name is not `isPrime`,
-/// or if the number value is not a number.
-///
-/// Extraneous fields are to be ignored.
-///
-/// A conforming response object has the required field method,
-/// which must always contain the string `isPrime`, and the required field prime,
-/// which must contain a boolean value: true if the number in the request was prime,
-/// false if it was not.
-///
-/// Output Example:
-///  `{"method":"isPrime","prime":false}`
-///
-/// A response is malformed if it is not a well-formed JSON object, if any required field is missing,
-/// if the method name is not `isPrime`, or if the prime value is not a boolean.
-///
-/// Accept TCP connections.
-///
-/// Whenever you receive a conforming request, send back a correct response, and wait for another request.
-///
-/// Whenever you receive a malformed request, send back a single malformed response, and disconnect the client.
-///
-/// Make sure you can handle at least 5 simultaneous clients.
-#[derive(Debug, Default)]
-pub struct PrimeTimeSolution;
-
-/// Implement the solution trait for the solution
-impl PrimeTimeSolution {
-    /// Create a new instance of the solution
-    pub fn new() -> Self {
-        Self::default()
-    }
-}
-
-/// Implement the protocol trait for the solution
-/// This is where the custom logic for the solution is implemented
-impl Protocol for PrimeTimeSolution {
-    /// The delimiter is a newline character
-    fn get_delimiter(&self) -> RequestDelimiter {
-        RequestDelimiter::UntilChar(b'\n')
-    }
-
-    /// Process a request and return a response
-    fn process_request(&mut self, line: &[u8]) -> Result<Action, SolutionError> {
-        // Construct a request from the u8 vec
-        let req = Request::from_bytes(line);
-
-        // Consume the request and construct a response
-        let resp = req.process();
-
-        // return an error if the response is malformed
-        // otherwise return the response
-        match resp {
-            Response::ConformingResp { .. } => Ok(Action::Reply(resp.into_bytes())),
-            Response::MalformedResp => Err(SolutionError::MalformedRequest(resp.into_bytes())),
-        }
     }
 }
 
