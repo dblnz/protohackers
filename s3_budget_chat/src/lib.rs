@@ -4,7 +4,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use server::{Server, ServerErrorKind};
-use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufStream};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufStream};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{mpsc, Mutex};
 
@@ -130,192 +130,9 @@ use tokio::sync::{mpsc, Mutex};
 ///
 /// Make sure you support at least 10 simultaneous clients.
 #[derive(Debug, Default)]
-pub struct BudgetChatSolution {
-    name: Option<String>,
-    members: Vec<String>,
-    state: ChatState,
-}
-
-#[derive(Debug, Default)]
-enum ChatState {
-    #[default]
-    Joined,
-    Sync,
-    Welcome,
-    BroadcastName,
-    ShowMembers,
-    Chat,
-}
-
-impl BudgetChatSolution {
-    pub fn new() -> Self {
-        Self {
-            name: None,
-            members: vec![],
-            state: ChatState::Joined,
-        }
-    }
-
-    pub fn set_name(&mut self, name: &str) {
-        self.name = Some(name.to_string());
-    }
-
-    pub fn add_member(&mut self, name: &str) {
-        self.members.push(name.to_string());
-    }
-
-    pub fn remove_member(&mut self, name: &str) {
-        self.members.retain(|n| n != name);
-    }
-
-    pub fn next_state(&mut self) {
-        self.state = match self.state {
-            ChatState::Joined => ChatState::Sync,
-            ChatState::Sync => ChatState::Welcome,
-            ChatState::Welcome => ChatState::BroadcastName,
-            ChatState::BroadcastName => ChatState::ShowMembers,
-            ChatState::ShowMembers => ChatState::Chat,
-            ChatState::Chat => ChatState::Chat,
-        }
-    }
-
-    /// method to get the delimiter between two requests
-    fn get_delimiter(&self) -> RequestDelimiter {
-        RequestDelimiter::UntilChar(b'\n')
-    }
-
-    /// method to get the welcome message
-    fn welcome(&self) -> Option<Vec<u8>> {
-        Some(b"Welcome to budgetchat! What shall I call you?\n".to_vec())
-    }
-
-    /// method to process each received request/line
-    fn process_request(&mut self, line: &[u8]) -> Result<Action, SolutionError> {
-        match self.state {
-            ChatState::Joined => {
-                // Advance state
-                self.next_state();
-                Ok(Action::Reply(
-                    b"Welcome to budgetchat! What shall I call you?\n".to_vec(),
-                ))
-            }
-            ChatState::Sync => {
-                // Advance state
-                self.next_state();
-                Ok(Action::Reply(
-                    b"* The room contains: bob, charlie, dave\n".to_vec(),
-                ))
-            }
-            ChatState::Welcome => {
-                // Advance state
-                self.next_state();
-                // Set name
-                let name = std::str::from_utf8(line).unwrap().trim();
-                self.set_name(name.clone());
-                // Add member
-                self.add_member(name);
-                Ok(Action::Reply(
-                    b"* The room contains: bob, charlie, dave\n".to_vec(),
-                ))
-            }
-            ChatState::BroadcastName => {
-                // Advance state
-                self.next_state();
-                // Broadcast name
-                Ok(Action::Broadcast(
-                    format!("* {} has entered the room\n", self.name.as_ref().unwrap())
-                        .into_bytes(),
-                ))
-            }
-            ChatState::ShowMembers => {
-                // Advance state
-                self.next_state();
-                // Show members
-                Ok(Action::Reply(
-                    format!("* The room contains: {}\n", self.members.join(", ")).into_bytes(),
-                ))
-            }
-            ChatState::Chat => {
-                // Advance state
-                self.next_state();
-                // Broadcast message
-                Ok(Action::Broadcast(
-                    format!(
-                        "[{}] {}\n",
-                        self.name.as_ref().unwrap(),
-                        std::str::from_utf8(line).unwrap().trim()
-                    )
-                    .into_bytes(),
-                ))
-            }
-        }
-    }
-
-    /// method to process each received peer message
-    fn process_peer_msg(&mut self, line: &[u8]) -> Result<Action, SolutionError> {
-        unimplemented!()
-    }
-}
-
-/// Custom Error type used to treat Solution specific errors
-#[derive(Debug, PartialEq)]
-pub enum SolutionError {
-    MalformedRequest(Vec<u8>),
-    Read,
-    Write,
-}
-
-#[derive(Debug)]
-pub enum RequestDelimiter {
-    UntilChar(u8),
-    NoOfBytes(usize),
-}
-
-/// Shorthand for the transmit half of the message channel.
-type Tx = mpsc::UnboundedSender<Vec<u8>>;
-
-pub struct SharedState {
-    peers: HashMap<SocketAddr, (Option<String>, Tx)>,
-}
-
-impl Default for SharedState {
-    fn default() -> Self {
-        Self {
-            peers: HashMap::new(),
-        }
-    }
-}
-
-impl SharedState {
-    fn new() -> Self {
-        Self::default()
-    }
-
-    async fn send(&mut self, _to: SocketAddr, _from: SocketAddr, _message: &[u8]) {
-        unimplemented!()
-    }
-
-    async fn broadcast(&mut self, from: SocketAddr, message: &[u8]) {
-        for peer in self.peers.iter_mut() {
-            if *peer.0 != from {
-                let _ = peer.1 .1.send(message.into());
-            }
-        }
-    }
-}
-
 pub struct BudgetChatServer {
     listener: Option<TcpListener>,
     state: Arc<Mutex<SharedState>>,
-}
-
-impl Default for BudgetChatServer {
-    fn default() -> Self {
-        Self {
-            listener: None,
-            state: Arc::new(Mutex::new(SharedState::default())),
-        }
-    }
 }
 
 #[async_trait]
@@ -346,14 +163,12 @@ impl Server for BudgetChatServer {
 
                 println!("Connection open\n");
 
+                // Clone the state to move into the new task.
                 let state = self.state.clone();
 
                 // A new task is spawned for each inbound socket. The socket is
                 // moved to the new task and processed there.
-                tokio::spawn(async move {
-                    let sol = BudgetChatSolution::default();
-                    process(state, sol, socket).await
-                });
+                tokio::spawn(async move { process(state, socket).await });
             }
         } else {
             Err(ServerErrorKind::NotBound)
@@ -361,98 +176,42 @@ impl Server for BudgetChatServer {
     }
 }
 
-/// This is needed to avoid the fact that the types of
-/// `read_until` and `read_exact` are different
-/// So we need to have a common function that can be used
-async fn read_until_del(
-    stream: &mut BufStream<TcpStream>,
-    line: &mut Vec<u8>,
-    delimiter: RequestDelimiter,
-) -> Result<usize, SolutionError> {
-    let mut line = line;
-
-    let len = match delimiter {
-        RequestDelimiter::UntilChar(del) => stream
-            .read_until(del, &mut line)
-            .await
-            .map_err(|_| SolutionError::Read)?,
-        RequestDelimiter::NoOfBytes(n) => {
-            *line = vec![0; n];
-            stream
-                .read_exact(&mut line)
-                .await
-                .map_err(|_| SolutionError::Read)?
-        }
-    };
-
-    if len > 0 {
-        Ok(len)
-    } else {
-        Err(SolutionError::Read)
-    }
-}
-
-/// This function welcomes a new client
-///
-/// This is solution specific, it might not send a
-/// message after all
-async fn welcome_client(
-    solution: &mut BudgetChatSolution,
-    stream: &mut BufStream<TcpStream>,
-) -> Result<(), SolutionError> {
-    if let Some(msg) = solution.welcome() {
-        if !msg.is_empty() {
-            stream
-                .write_all(msg.as_slice())
-                .await
-                .map_err(|_| SolutionError::Write)?;
-
-            stream.flush().await.map_err(|_| SolutionError::Write)?;
-        }
-    }
-
-    Ok(())
-}
-
 /// Custom Action type that is returned by the `Protocol`
 ///
 /// This is used to define the action to be taken by the server
 #[derive(Debug, PartialEq)]
-pub enum Action {
+enum ClientAction {
     Broadcast(Vec<u8>),
-    Disconnect(Vec<u8>),
     Reply(Vec<u8>),
-    Send(SocketAddr, Vec<u8>),
+    SetName(String),
+}
+
+enum ClientError {
+    MalformedRequest(Vec<u8>),
+    UnconformingName(Vec<u8>),
 }
 
 /// Processes a connection
 ///
 /// Returns a `Result` which contains the number of processed bytes on the
 /// success path and a custom defined error `SolutionError`
-async fn process(
-    state: Arc<Mutex<SharedState>>,
-    solution: BudgetChatSolution,
-    stream: TcpStream,
-) -> Result<(), SolutionError> {
-    let mut solution = solution;
+async fn process(state: Arc<Mutex<SharedState>>, stream: TcpStream) -> Result<(), ServerErrorKind> {
     let mut stream = BufStream::new(stream);
     let mut line = vec![];
     let mut should_continue = true;
+    let mut client = ChatClient::default();
 
     // Get address of peer
     let addr = stream
         .get_ref()
         .peer_addr()
-        .map_err(|_| SolutionError::Read)?;
+        .map_err(|_| ServerErrorKind::ReadFail)?;
 
     // Create a channel for the peer
     let (tx, mut rx) = mpsc::unbounded_channel::<Vec<u8>>();
 
     // Add entry to this peer in the shared state
     state.lock().await.peers.insert(addr, (None, tx));
-
-    // Send welcome message to the peer
-    welcome_client(&mut solution, &mut stream).await?;
 
     // Loop until no bytes are read
     while should_continue {
@@ -461,21 +220,14 @@ async fn process(
             // If there's a message from another peer
             Some(msg) = rx.recv() => {
                 // Process the received peer message
-                let response = match solution.process_peer_msg(&msg) {
-                    Ok(Action::Broadcast(arr)) => {
+                let response = match client.process_peer_msg(&msg) {
+                    Ok(ClientAction::Broadcast(arr)) => {
                         state.lock().await.broadcast(addr, arr.as_slice()).await;
                         vec![]
                     }
-                    Ok(Action::Disconnect(arr)) => {
-                        should_continue = false;
-                        arr
-                    }
-                    Ok(Action::Reply(arr)) => arr,
-                    Ok(Action::Send(to, arr)) => {
-                        state.lock().await.send(to, addr, arr.as_slice()).await;
-                        vec![]
-                    }
-                    Err(SolutionError::MalformedRequest(arr)) => {
+                    Ok(ClientAction::SetName(_)) => unimplemented!(),
+                    Ok(ClientAction::Reply(arr)) => arr,
+                    Err(ClientError::MalformedRequest(arr)) => {
                         // In case an error occures stop reading
                         should_continue = false;
                         arr
@@ -493,41 +245,65 @@ async fn process(
                     stream
                         .write_all(&response)
                         .await
-                        .map_err(|_| SolutionError::Write)?;
+                        .map_err(|_| ServerErrorKind::WriteFail)?;
 
                     // Flush the buffer to ensure it is sent
-                    stream.flush().await.map_err(|_| SolutionError::Write)?;
+                    stream.flush().await.map_err(|_| ServerErrorKind::WriteFail)?;
                 }
             }
             // If there's a request incoming
-            result = read_until_del(&mut stream, &mut line, solution.get_delimiter()) => {
-                let read_len = result?;
+            result = stream.read_until(b'\n', &mut line) => {
+                let read_len = result.map_err(|_| ServerErrorKind::ReadFail)?;
 
                 if read_len > 0 {
                     // Process the received request/line
-                    let response = match solution.process_request(&line) {
-                        Ok(Action::Broadcast(arr)) => {
-                            state.lock().await.broadcast(addr, arr.as_slice()).await;
-                            vec![]
+                    let response = match client.process_request(&line) {
+                        Ok(actions) => {
+                            let mut resp = vec![];
+
+                            for action in actions.into_iter() {
+                                match action {
+                                    ClientAction::Broadcast(arr) => {
+                                        state.lock().await.broadcast(addr, arr.as_slice()).await;
+                                    }
+                                    ClientAction::Reply(arr) => {
+                                        if client.members.is_none() {
+                                            let s = state.lock().await;
+
+                                            let addreses = s
+                                                .peers
+                                                .keys()
+                                                .filter(|&k| k != &addr)
+                                                .collect::<Vec<&SocketAddr>>();
+                                            let members = addreses
+                                                .iter()
+                                                .map(|&ad| s.peers.get(ad).unwrap().0.clone())
+                                                .filter(|o| o.is_some())
+                                                .map(|o| o.unwrap())
+                                                .collect();
+
+                                            dbg!(client.members = Some(members));
+                                        }
+
+                                        resp.extend(arr)
+                                    }
+                                    ClientAction::SetName(name) => {
+                                        let mut s = state.lock().await;
+
+                                        let v = s.peers.get_mut(&addr).unwrap();
+
+
+                                        dbg!(v.0 = Some(name));
+                                    }
+                                }
+                            }
+
+                            resp
                         }
-                        Ok(Action::Disconnect(arr)) => {
-                            should_continue = false;
-                            arr
-                        }
-                        Ok(Action::Reply(arr)) => arr,
-                        Ok(Action::Send(to, arr)) => {
-                            state.lock().await.send(to, addr, arr.as_slice()).await;
-                            vec![]
-                        }
-                        Err(SolutionError::MalformedRequest(arr)) => {
+                        Err(ClientError::MalformedRequest(arr)) | Err(ClientError::UnconformingName(arr)) => {
                             // In case an error occures stop reading
                             should_continue = false;
                             arr
-                        }
-                        Err(_) => {
-                            // In case an error occures stop reading
-                            should_continue = false;
-                            vec![]
                         }
                     };
 
@@ -537,10 +313,10 @@ async fn process(
                         stream
                             .write_all(&response)
                             .await
-                            .map_err(|_| SolutionError::Write)?;
+                            .map_err(|_| ServerErrorKind::WriteFail)?;
 
                         // Flush the buffer to ensure it is sent
-                        stream.flush().await.map_err(|_| SolutionError::Write)?;
+                        stream.flush().await.map_err(|_| ServerErrorKind::WriteFail)?;
                     }
                 } else {
                     should_continue = false;
@@ -554,13 +330,118 @@ async fn process(
     Ok(())
 }
 
+#[derive(Debug, Default)]
+pub struct ChatClient {
+    name: Option<String>,
+    state: ChatState,
+    members: Option<Vec<String>>,
+}
+
+#[derive(Debug, Default)]
+enum ChatState {
+    #[default]
+    Welcome,
+    GetName,
+    Chat,
+}
+
+impl ChatClient {
+    fn next_state(&mut self) {
+        self.state = match self.state {
+            ChatState::Welcome => ChatState::GetName,
+            ChatState::GetName => ChatState::Chat,
+            ChatState::Chat => ChatState::Chat,
+        }
+    }
+
+    /// method to process each received request/line
+    fn process_request(&mut self, line: &[u8]) -> Result<Vec<ClientAction>, ClientError> {
+        match self.state {
+            ChatState::Welcome => {
+                self.next_state();
+                Ok(vec![ClientAction::Reply(
+                    b"Welcome to budgetchat! What shall I call you?\n".to_vec(),
+                )])
+            }
+            ChatState::GetName => {
+                let mut name = String::from_utf8(line.to_vec()).map_err(|_| {
+                    ClientError::UnconformingName(b"Not a valid string for a name\n".to_vec())
+                })?;
+
+                name = name
+                    .strip_suffix("\r\n")
+                    .or(name.strip_suffix("\n"))
+                    .unwrap_or(&name)
+                    .to_string();
+
+                if name.chars().all(|c| c.is_alphanumeric()) {
+                    self.name = Some(name.clone());
+                    self.next_state();
+                    let members = self.members.as_ref().unwrap().join(",");
+                    Ok(vec![
+                        ClientAction::Broadcast(
+                            format!("* {} has entered the room\n", name)
+                                .as_bytes()
+                                .to_vec(),
+                        ),
+                        ClientAction::Reply(
+                            format!("* The room contains: {}\n", members)
+                                .as_bytes()
+                                .to_vec(),
+                        ),
+                        dbg!(ClientAction::SetName(self.name.clone().unwrap().clone())),
+                    ])
+                } else {
+                    Err(ClientError::UnconformingName(
+                        b"Not a valid string for a name\n".to_vec(),
+                    ))
+                }
+            }
+            ChatState::Chat => {
+                let msg = String::from_utf8(line.to_vec()).map_err(|_| {
+                    ClientError::MalformedRequest(b"Not a valid string for a message\n".to_vec())
+                })?;
+
+                Ok(vec![ClientAction::Broadcast(
+                    format!("[{}] {}\n", self.name.as_ref().unwrap(), msg)
+                        .as_bytes()
+                        .to_vec(),
+                )])
+            }
+        }
+    }
+
+    /// method to process each received peer message
+    fn process_peer_msg(&mut self, line: &[u8]) -> Result<ClientAction, ClientError> {
+        Ok(ClientAction::Reply(line.to_vec()))
+    }
+}
+
+/// Shorthand for the transmit half of the message channel.
+type Tx = mpsc::UnboundedSender<Vec<u8>>;
+
+#[derive(Debug, Default)]
+struct SharedState {
+    peers: HashMap<SocketAddr, (Option<String>, Tx)>,
+}
+
+impl SharedState {
+    async fn broadcast(&mut self, from: SocketAddr, message: &[u8]) {
+        for peer in self.peers.iter_mut() {
+            if *peer.0 != from {
+                let _ = peer.1 .1.send(message.into());
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn test_process_request() {
-        let mut solution = BudgetChatSolution;
+        let mut solution = ChatClient;
         let line = b"hello world\n";
         let res = solution.process_request(line);
         assert_eq!(res.is_ok(), true);
