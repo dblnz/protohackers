@@ -239,7 +239,7 @@ impl ChatClient {
                     .unwrap_or(&name)
                     .to_string();
 
-                if name.chars().all(|c| c.is_alphanumeric()) {
+                if name.chars().all(|c| c.is_alphanumeric()) && !name.is_empty() {
                     self.name = Some(name.clone());
                     self.next_state();
 
@@ -281,7 +281,8 @@ impl ChatClient {
                     ClientError::MalformedRequest(b"Not a valid string for a message\n".to_vec())
                 })?;
 
-                msg = msg.strip_suffix("\r\n")
+                msg = msg
+                    .strip_suffix("\r\n")
                     .or(msg.strip_suffix('\n'))
                     .unwrap_or(&msg)
                     .to_string();
@@ -392,7 +393,19 @@ impl ChatClient {
         }
 
         // Remove peer from shared state list
-        self.shared_state.lock().await.peers.remove(&self.addr);
+        let k = self.shared_state.lock().await.peers.remove(&self.addr);
+
+        if let Some(_) = k {
+            // Send disconnect message
+            self.shared_state
+                .lock()
+                .await
+                .broadcast(
+                    addr,
+                    format!("* {} has left the room", self.name.clone().unwrap()).as_bytes(),
+                )
+                .await;
+        }
 
         Ok(())
     }
