@@ -159,7 +159,7 @@ impl Server for BudgetChatServer {
                 println!("Waiting for connection ...");
 
                 // The second item contains the IP and port of the new connection.
-                let (socket, _) = l.accept().await.unwrap();
+                let (socket, addr) = l.accept().await.unwrap();
 
                 println!("Connection open\n");
 
@@ -168,7 +168,10 @@ impl Server for BudgetChatServer {
 
                 // A new task is spawned for each inbound socket. The socket is
                 // moved to the new task and processed there.
-                tokio::spawn(async move { process(state, socket).await });
+                tokio::spawn(async move {
+                    let mut client = ChatClient::new(addr, state);
+                    client.process(socket).await
+                });
             }
         } else {
             Err(ServerErrorKind::NotBound)
@@ -182,187 +185,49 @@ impl Server for BudgetChatServer {
 #[derive(Debug, PartialEq)]
 enum ClientAction {
     Broadcast(Vec<u8>),
-    Reply(Vec<u8>),
-    SetName(String),
+    Reply(String, Vec<u8>),
 }
 
+#[derive(Debug)]
 enum ClientError {
     MalformedRequest(Vec<u8>),
     UnconformingName(Vec<u8>),
 }
 
-/// Processes a connection
-///
-/// Returns a `Result` which contains the number of processed bytes on the
-/// success path and a custom defined error `SolutionError`
-async fn process(state: Arc<Mutex<SharedState>>, stream: TcpStream) -> Result<(), ServerErrorKind> {
-    let mut stream = BufStream::new(stream);
-    let mut line = vec![];
-    let mut should_continue = true;
-    let mut client = ChatClient::default();
-
-    // Get address of peer
-    let addr = stream
-        .get_ref()
-        .peer_addr()
-        .map_err(|_| ServerErrorKind::ReadFail)?;
-
-    // Create a channel for the peer
-    let (tx, mut rx) = mpsc::unbounded_channel::<Vec<u8>>();
-
-    // Add entry to this peer in the shared state
-    state.lock().await.peers.insert(addr, (None, tx));
-
-    // Loop until no bytes are read
-    while should_continue {
-        // Wait for messages from other peers or parse the received request
-        tokio::select! {
-            // If there's a message from another peer
-            Some(msg) = rx.recv() => {
-                // Process the received peer message
-                let response = match client.process_peer_msg(&msg) {
-                    Ok(ClientAction::Broadcast(arr)) => {
-                        state.lock().await.broadcast(addr, arr.as_slice()).await;
-                        vec![]
-                    }
-                    Ok(ClientAction::SetName(_)) => unimplemented!(),
-                    Ok(ClientAction::Reply(arr)) => arr,
-                    Err(ClientError::MalformedRequest(arr)) => {
-                        // In case an error occures stop reading
-                        should_continue = false;
-                        arr
-                    }
-                    Err(_) => {
-                        // In case an error occures stop reading
-                        should_continue = false;
-                        vec![]
-                    }
-                };
-
-                // If there's something to send
-                if !response.is_empty() {
-                    // Send back the result
-                    stream
-                        .write_all(&response)
-                        .await
-                        .map_err(|_| ServerErrorKind::WriteFail)?;
-
-                    // Flush the buffer to ensure it is sent
-                    stream.flush().await.map_err(|_| ServerErrorKind::WriteFail)?;
-                }
-            }
-            // If there's a request incoming
-            result = stream.read_until(b'\n', &mut line) => {
-                let read_len = result.map_err(|_| ServerErrorKind::ReadFail)?;
-
-                if read_len > 0 {
-                    // Process the received request/line
-                    let response = match client.process_request(&line) {
-                        Ok(actions) => {
-                            let mut resp = vec![];
-
-                            for action in actions.into_iter() {
-                                match action {
-                                    ClientAction::Broadcast(arr) => {
-                                        state.lock().await.broadcast(addr, arr.as_slice()).await;
-                                    }
-                                    ClientAction::Reply(arr) => {
-                                        if client.members.is_none() {
-                                            let s = state.lock().await;
-
-                                            let addreses = s
-                                                .peers
-                                                .keys()
-                                                .filter(|&k| k != &addr)
-                                                .collect::<Vec<&SocketAddr>>();
-                                            let members = addreses
-                                                .iter()
-                                                .map(|&ad| s.peers.get(ad).unwrap().0.clone())
-                                                .filter(|o| o.is_some())
-                                                .map(|o| o.unwrap())
-                                                .collect();
-
-                                            dbg!(client.members = Some(members));
-                                        }
-
-                                        resp.extend(arr)
-                                    }
-                                    ClientAction::SetName(name) => {
-                                        let mut s = state.lock().await;
-
-                                        let v = s.peers.get_mut(&addr).unwrap();
-
-
-                                        dbg!(v.0 = Some(name));
-                                    }
-                                }
-                            }
-
-                            resp
-                        }
-                        Err(ClientError::MalformedRequest(arr)) | Err(ClientError::UnconformingName(arr)) => {
-                            // In case an error occures stop reading
-                            should_continue = false;
-                            arr
-                        }
-                    };
-
-                    // If there's something to send
-                    if !response.is_empty() {
-                        // Send back the result
-                        stream
-                            .write_all(&response)
-                            .await
-                            .map_err(|_| ServerErrorKind::WriteFail)?;
-
-                        // Flush the buffer to ensure it is sent
-                        stream.flush().await.map_err(|_| ServerErrorKind::WriteFail)?;
-                    }
-                } else {
-                    should_continue = false;
-                }
-
-                line.clear();
-            }
-        }
-    }
-
-    Ok(())
-}
-
-#[derive(Debug, Default)]
-pub struct ChatClient {
+#[derive(Debug)]
+struct ChatClient {
+    addr: SocketAddr,
     name: Option<String>,
     state: ChatState,
-    members: Option<Vec<String>>,
+    shared_state: Arc<Mutex<SharedState>>,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 enum ChatState {
-    #[default]
-    Welcome,
     GetName,
     Chat,
 }
 
 impl ChatClient {
+    fn new(addr: SocketAddr, state: Arc<Mutex<SharedState>>) -> Self {
+        Self {
+            addr,
+            name: None,
+            state: ChatState::GetName,
+            shared_state: state,
+        }
+    }
+
     fn next_state(&mut self) {
         self.state = match self.state {
-            ChatState::Welcome => ChatState::GetName,
             ChatState::GetName => ChatState::Chat,
             ChatState::Chat => ChatState::Chat,
         }
     }
 
     /// method to process each received request/line
-    fn process_request(&mut self, line: &[u8]) -> Result<Vec<ClientAction>, ClientError> {
+    async fn process_request(&mut self, line: &[u8]) -> Result<ClientAction, ClientError> {
         match self.state {
-            ChatState::Welcome => {
-                self.next_state();
-                Ok(vec![ClientAction::Reply(
-                    b"Welcome to budgetchat! What shall I call you?\n".to_vec(),
-                )])
-            }
             ChatState::GetName => {
                 let mut name = String::from_utf8(line.to_vec()).map_err(|_| {
                     ClientError::UnconformingName(b"Not a valid string for a name\n".to_vec())
@@ -370,27 +235,41 @@ impl ChatClient {
 
                 name = name
                     .strip_suffix("\r\n")
-                    .or(name.strip_suffix("\n"))
+                    .or(name.strip_suffix('\n'))
                     .unwrap_or(&name)
                     .to_string();
 
                 if name.chars().all(|c| c.is_alphanumeric()) {
                     self.name = Some(name.clone());
                     self.next_state();
-                    let members = self.members.as_ref().unwrap().join(",");
-                    Ok(vec![
-                        ClientAction::Broadcast(
-                            format!("* {} has entered the room\n", name)
-                                .as_bytes()
-                                .to_vec(),
-                        ),
-                        ClientAction::Reply(
-                            format!("* The room contains: {}\n", members)
-                                .as_bytes()
-                                .to_vec(),
-                        ),
-                        dbg!(ClientAction::SetName(self.name.clone().unwrap().clone())),
-                    ])
+
+                    // Broadcast the name to all other peers
+                    self.shared_state
+                        .lock()
+                        .await
+                        .broadcast(
+                            self.addr,
+                            format!("* {} has entered the room\n", name).as_bytes(),
+                        )
+                        .await;
+
+                    // Get the members list
+                    let members = self
+                        .shared_state
+                        .lock()
+                        .await
+                        .peers
+                        .values()
+                        .map(|item| item.0.clone())
+                        .collect::<Vec<String>>()
+                        .join(",");
+
+                    Ok(ClientAction::Reply(
+                        name,
+                        format!("* The room contains: {}\n", members)
+                            .as_bytes()
+                            .to_vec(),
+                    ))
                 } else {
                     Err(ClientError::UnconformingName(
                         b"Not a valid string for a name\n".to_vec(),
@@ -398,22 +277,124 @@ impl ChatClient {
                 }
             }
             ChatState::Chat => {
-                let msg = String::from_utf8(line.to_vec()).map_err(|_| {
+                let mut msg = String::from_utf8(line.to_vec()).map_err(|_| {
                     ClientError::MalformedRequest(b"Not a valid string for a message\n".to_vec())
                 })?;
 
-                Ok(vec![ClientAction::Broadcast(
+                msg = msg.strip_suffix("\r\n")
+                    .or(msg.strip_suffix('\n'))
+                    .unwrap_or(&msg)
+                    .to_string();
+
+                Ok(ClientAction::Broadcast(
                     format!("[{}] {}\n", self.name.as_ref().unwrap(), msg)
                         .as_bytes()
                         .to_vec(),
-                )])
+                ))
             }
         }
     }
 
-    /// method to process each received peer message
-    fn process_peer_msg(&mut self, line: &[u8]) -> Result<ClientAction, ClientError> {
-        Ok(ClientAction::Reply(line.to_vec()))
+    /// Processes a connection
+    ///
+    /// Returns a `Result` which contains the number of processed bytes on the
+    /// success path and a custom defined error `SolutionError`
+    async fn process(&mut self, stream: TcpStream) -> Result<(), ServerErrorKind> {
+        let mut stream = BufStream::new(stream);
+        let mut line = vec![];
+        let mut should_continue = true;
+
+        // Get address of peer
+        let addr = stream
+            .get_ref()
+            .peer_addr()
+            .map_err(|_| ServerErrorKind::ReadFail)?;
+
+        // Create a channel for the peer
+        let (tx, mut rx) = mpsc::unbounded_channel::<Vec<u8>>();
+
+        // Send back the result
+        stream
+            .write_all(b"Welcome to budgetchat! What shall I call you?\n")
+            .await
+            .map_err(|_| ServerErrorKind::WriteFail)?;
+
+        // Flush the buffer to ensure it is sent
+        stream
+            .flush()
+            .await
+            .map_err(|_| ServerErrorKind::WriteFail)?;
+
+        let mut only_tx = Some(tx);
+
+        // Loop until no bytes are read
+        while should_continue {
+            // Wait for messages from other peers or parse the received request
+            tokio::select! {
+                // If there's a message from another peer it is a chat message
+                Some(msg) = rx.recv() => {
+                    if !msg.is_empty() {
+                        // Send back the result
+                        stream
+                            .write_all(&msg)
+                            .await
+                            .map_err(|_| ServerErrorKind::WriteFail)?;
+
+                        // Flush the buffer to ensure it is sent
+                        stream.flush().await.map_err(|_| ServerErrorKind::WriteFail)?;
+                    }
+                }
+                // If there's a request incoming
+                result = stream.read_until(b'\n', &mut line) => {
+                    let read_len = result.map_err(|_| ServerErrorKind::ReadFail)?;
+
+                    if read_len > 0 {
+                        // Process the received request/line
+                        let response = match self.process_request(&line).await {
+                            Ok(ClientAction::Broadcast(arr)) => {
+                                self.shared_state.lock().await.broadcast(addr, arr.as_slice()).await;
+                                vec![]
+                            }
+                            // Only returned when a new member sets his name
+                            Ok(ClientAction::Reply(name, arr)) => {
+                                // Add the current peer to the list signaling it is up for receiving messages
+                                if let Some(tx) = only_tx {
+                                    self.shared_state.lock().await.peers.insert(self.addr, (name, tx));
+                                    only_tx = None;
+                                }
+                                arr
+                            }
+                            Err(ClientError::MalformedRequest(arr)) | Err(ClientError::UnconformingName(arr)) => {
+                                // In case an error occures stop reading
+                                should_continue = false;
+                                arr
+                            }
+                        };
+
+                        // If there's something to send
+                        if !response.is_empty() {
+                            // Send back the result
+                            stream
+                                .write_all(&response)
+                                .await
+                                .map_err(|_| ServerErrorKind::WriteFail)?;
+
+                            // Flush the buffer to ensure it is sent
+                            stream.flush().await.map_err(|_| ServerErrorKind::WriteFail)?;
+                        }
+                    } else {
+                        should_continue = false;
+                    }
+
+                    line.clear();
+                }
+            }
+        }
+
+        // Remove peer from shared state list
+        self.shared_state.lock().await.peers.remove(&self.addr);
+
+        Ok(())
     }
 }
 
@@ -422,7 +403,7 @@ type Tx = mpsc::UnboundedSender<Vec<u8>>;
 
 #[derive(Debug, Default)]
 struct SharedState {
-    peers: HashMap<SocketAddr, (Option<String>, Tx)>,
+    peers: HashMap<SocketAddr, (String, Tx)>,
 }
 
 impl SharedState {
