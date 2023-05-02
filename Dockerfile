@@ -1,5 +1,6 @@
 FROM rust:1.68.0-slim-bullseye AS builder
 
+ARG SOL
 ARG APP_NAME=protohackers
 
 RUN echo "Preparing app ${APP_NAME}"
@@ -12,7 +13,7 @@ RUN --mount=type=cache,target=/app/target \
 		--mount=type=cache,target=/usr/local/rustup \
 		set -eux; \
 		rustup install stable; \
-	 	cargo build --release --features s2; \
+	 	cargo build --release --features $SOL; \
 		objcopy --compress-debug-sections target/release/$APP_NAME ./$APP_NAME
 
 ################################################################################
