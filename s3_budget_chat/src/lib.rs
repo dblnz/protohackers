@@ -170,7 +170,7 @@ impl Server for BudgetChatServer {
                 // moved to the new task and processed there.
                 tokio::spawn(async move {
                     let mut client = ChatClient::new(addr, state);
-                    client.process(socket).await
+                    client.run(socket).await
                 });
             }
         } else {
@@ -195,17 +195,17 @@ enum ClientError {
 }
 
 #[derive(Debug)]
+enum ChatState {
+    GetName,
+    Chat,
+}
+
+#[derive(Debug)]
 struct ChatClient {
     addr: SocketAddr,
     name: Option<String>,
     state: ChatState,
     shared_state: Arc<Mutex<SharedState>>,
-}
-
-#[derive(Debug)]
-enum ChatState {
-    GetName,
-    Chat,
 }
 
 impl ChatClient {
@@ -233,12 +233,14 @@ impl ChatClient {
                     ClientError::UnconformingName(b"Not a valid string for a name\n".to_vec())
                 })?;
 
+                // Remove the trailing newline
                 name = name
                     .strip_suffix("\r\n")
                     .or(name.strip_suffix('\n'))
                     .unwrap_or(&name)
                     .to_string();
 
+                // Check if the name is valid
                 if name.chars().all(|c| c.is_alphanumeric()) && !name.is_empty() {
                     self.name = Some(name.clone());
                     self.next_state();
@@ -253,7 +255,7 @@ impl ChatClient {
                         )
                         .await;
 
-                    // Get the members list
+                    // Get the members list - excluding the current peer (not in the list yet)
                     let members = self
                         .shared_state
                         .lock()
@@ -281,6 +283,7 @@ impl ChatClient {
                     ClientError::MalformedRequest(b"Not a valid string for a message\n".to_vec())
                 })?;
 
+                // Remove the trailing newline
                 msg = msg
                     .strip_suffix("\r\n")
                     .or(msg.strip_suffix('\n'))
@@ -296,10 +299,39 @@ impl ChatClient {
         }
     }
 
+    /// Method that runs a client
+    ///
+    /// This method also takes care of the disconnect message
+    /// The reason it was designed this way is to take
+    /// advantage of the `?` operator which in the `process`
+    /// method imediately returns the error to the caller
+    async fn run(&mut self, stream: TcpStream) -> Result<(), ServerErrorKind> {
+        // Get address of peer
+        let addr = stream.peer_addr().map_err(|_| ServerErrorKind::ReadFail)?;
+
+        let res = self.process(stream).await;
+
+        // Remove peer from shared state list
+        let k = self.shared_state.lock().await.peers.remove(&self.addr);
+
+        if k.is_some() {
+            // Send disconnect message
+            let msg = format!("* {} has left the room\n", self.name.clone().unwrap());
+
+            self.shared_state
+                .lock()
+                .await
+                .broadcast(addr, msg.as_bytes())
+                .await;
+        }
+
+        res
+    }
+
     /// Processes a connection
     ///
-    /// Returns a `Result` which contains the number of processed bytes on the
-    /// success path and a custom defined error `SolutionError`
+    /// Returns a `Result` which contains an empty tuple on success
+    /// and a `ServerErrorKind` on failure
     async fn process(&mut self, stream: TcpStream) -> Result<(), ServerErrorKind> {
         let mut stream = BufStream::new(stream);
         let mut line = vec![];
@@ -335,7 +367,7 @@ impl ChatClient {
                 // If there's a message from another peer it is a chat message
                 Some(msg) = rx.recv() => {
                     if !msg.is_empty() {
-                        // Send back the result
+                        // Send the message to the other end
                         stream
                             .write_all(&msg)
                             .await
@@ -352,6 +384,7 @@ impl ChatClient {
                     if read_len > 0 {
                         // Process the received request/line
                         let response = match self.process_request(&line).await {
+                            // A chat message
                             Ok(ClientAction::Broadcast(arr)) => {
                                 self.shared_state.lock().await.broadcast(addr, arr.as_slice()).await;
                                 vec![]
@@ -390,21 +423,6 @@ impl ChatClient {
                     line.clear();
                 }
             }
-        }
-
-        // Remove peer from shared state list
-        let k = self.shared_state.lock().await.peers.remove(&self.addr);
-
-        if let Some(_) = k {
-            // Send disconnect message
-            self.shared_state
-                .lock()
-                .await
-                .broadcast(
-                    addr,
-                    format!("* {} has left the room", self.name.clone().unwrap()).as_bytes(),
-                )
-                .await;
         }
 
         Ok(())
