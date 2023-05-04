@@ -107,44 +107,29 @@ use std::collections::HashMap;
 /// Where a client triggers undefined behaviour, the server can do anything it likes for that client,
 /// but must not adversely affect other clients that did not trigger undefined behaviour.
 #[derive(Debug, Default)]
-pub struct MeansToAnEndServer {
-    listener: Option<TcpListener>,
-}
+pub struct MeansToAnEndServer;
 
 #[async_trait]
 impl Server for MeansToAnEndServer {
-    /// Method that binds a server to the address:port given
-    async fn bind(&mut self, addr: &str) -> Result<(), ServerErrorKind> {
-        self.listener = Some(
-            TcpListener::bind(addr)
-                .await
-                .map_err(|_| ServerErrorKind::BindFail)?,
-        );
+    /// Method that runs the server
+    async fn run(&mut self, addr: &str) -> Result<(), ServerErrorKind> {
+        let listener = TcpListener::bind(addr)
+            .await
+            .map_err(|_| ServerErrorKind::BindFail)?;
 
         println!("Listening on {:?}", addr);
 
-        Ok(())
-    }
+        loop {
+            println!("Waiting for connection ...");
 
-    /// Method that puts the server in listening mode that
-    /// takes in new connections, reads requests and responds
-    /// to them accordingly
-    async fn listen(&mut self) -> Result<(), ServerErrorKind> {
-        if let Some(l) = self.listener.as_ref() {
-            loop {
-                println!("Waiting for connection ...");
+            // The second item contains the IP and port of the new connection.
+            let (socket, _) = listener.accept().await.unwrap();
 
-                // The second item contains the IP and port of the new connection.
-                let (socket, _) = l.accept().await.unwrap();
+            println!("Connection open\n");
 
-                println!("Connection open\n");
-
-                // A new task is spawned for each inbound socket. The socket is
-                // moved to the new task and processed there.
-                tokio::spawn(async move { process(socket).await });
-            }
-        } else {
-            Err(ServerErrorKind::NotBound)
+            // A new task is spawned for each inbound socket. The socket is
+            // moved to the new task and processed there.
+            tokio::spawn(async move { process(socket).await });
         }
     }
 }

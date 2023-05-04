@@ -37,9 +37,6 @@ async fn main() -> Result<(), ServerErrorKind> {
 
     let mut server = ServerSol::default();
 
-    // Bind the server to the address:port
-    server.bind(&addr.to_string()).await?;
-
-    // Start listening for new connections
-    server.listen().await
+    // start the server on the address:port
+    server.run(&addr.to_string()).await
 }

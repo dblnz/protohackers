@@ -131,50 +131,36 @@ use tokio::sync::{mpsc, Mutex};
 /// Make sure you support at least 10 simultaneous clients.
 #[derive(Debug, Default)]
 pub struct BudgetChatServer {
-    listener: Option<TcpListener>,
     state: Arc<Mutex<SharedState>>,
 }
 
 #[async_trait]
 impl Server for BudgetChatServer {
-    /// Method that binds a server to the address:port given
-    async fn bind(&mut self, addr: &str) -> Result<(), ServerErrorKind> {
-        self.listener = Some(
-            TcpListener::bind(addr)
-                .await
-                .map_err(|_| ServerErrorKind::BindFail)?,
-        );
+    /// method that starts the server
+    async fn run(&mut self, addr: &str) -> Result<(), ServerErrorKind> {
+        let listener = TcpListener::bind(addr)
+            .await
+            .map_err(|_| ServerErrorKind::BindFail)?;
 
         println!("Listening on {:?}", addr);
 
-        Ok(())
-    }
+        loop {
+            println!("Waiting for connection ...");
 
-    /// Method that puts the server in listening mode that
-    /// takes in new connections, reads requests and responds
-    /// to them accordingly
-    async fn listen(&mut self) -> Result<(), ServerErrorKind> {
-        if let Some(l) = self.listener.as_ref() {
-            loop {
-                println!("Waiting for connection ...");
+            // The second item contains the IP and port of the new connection.
+            let (socket, addr) = listener.accept().await.unwrap();
 
-                // The second item contains the IP and port of the new connection.
-                let (socket, addr) = l.accept().await.unwrap();
+            println!("Connection open\n");
 
-                println!("Connection open\n");
+            // Clone the state to move into the new task.
+            let state = self.state.clone();
 
-                // Clone the state to move into the new task.
-                let state = self.state.clone();
-
-                // A new task is spawned for each inbound socket. The socket is
-                // moved to the new task and processed there.
-                tokio::spawn(async move {
-                    let mut client = ChatClient::new(addr, state);
-                    client.run(socket).await
-                });
-            }
-        } else {
-            Err(ServerErrorKind::NotBound)
+            // A new task is spawned for each inbound socket. The socket is
+            // moved to the new task and processed there.
+            tokio::spawn(async move {
+                let mut client = ChatClient::new(addr, state);
+                client.run(socket).await
+            });
         }
     }
 }

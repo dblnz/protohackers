@@ -4,7 +4,6 @@ use async_trait::async_trait;
 #[derive(Debug)]
 pub enum ServerErrorKind {
     BindFail,
-    NotBound,
     ReadFail,
     WriteFail,
 }
@@ -14,11 +13,6 @@ pub trait Server
 where
     Self: Default
 {
-    /// Method that binds a server to the address:port given
-    async fn bind(&mut self, addr: &str) -> Result<(), ServerErrorKind>;
-
-    /// Method that puts the server in listening mode that
-    /// takes in new connections, reads requests and responds
-    /// to them accordingly
-    async fn listen(&mut self) -> Result<(), ServerErrorKind>;
+    /// Method that starts the server
+    async fn run(&mut self, addr: &str) -> Result<(), ServerErrorKind>;
 }
