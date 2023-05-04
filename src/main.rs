@@ -19,11 +19,13 @@ cfg_if! {
     } else if #[cfg(feature = "s3")] {
         use s3_budget_chat::BudgetChatServer;
         type ServerSol = BudgetChatServer;
+    } else if #[cfg(feature = "s4")] {
+        use s4_unusual_database_program::UnusualDatabaseProgramServer;
+        type ServerSol = UnusualDatabaseProgramServer;
     }
     else {
-        // compile_error!("Either feature \"s0\", \"s1\" or \"s2\" must be enabled for this app.");
-        use s3_budget_chat::BudgetChatServer;
-        type ServerSol = BudgetChatServer;
+        use s4_unusual_database_program::UnusualDatabaseProgramServer;
+        type ServerSol = UnusualDatabaseProgramServer;
     }
 }
 

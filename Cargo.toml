@@ -12,6 +12,7 @@ s0_smoke_test = { version = "0.1.0", path = "./s0_smoke_test" }
 s1_prime_time = { version = "0.1.0", path = "./s1_prime_time" }
 s2_means_to_an_end = { version = "0.1.0", path = "./s2_means_to_an_end" }
 s3_budget_chat = { version = "0.1.0", path = "./s3_budget_chat" }
+s4_unusual_database_program = { version = "0.1.0", path = "./s4_unusual_database_program" }
 server = { version = "0.1.0", path = "./server" }
 tokio = { version = "1.27.0", features = ["full"] }
 
@@ -24,3 +25,5 @@ s1 = []
 s2 = []
 # s3 - budget_chat
 s3 = []
+# s4 - unusual_database_program
+s4 = []
