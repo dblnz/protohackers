@@ -118,13 +118,15 @@ impl Server for UnusualDatabaseProgramServer {
                 .map_err(|_| ServerErrorKind::ReadFail)?;
             println!("{:?} bytes received from {:?}", len, addr);
 
-            let resp = self.process_request(&buf);
+            let resp = self.process_request(&buf[..len]);
 
-            let len = listener
-                .send_to(&resp, addr)
-                .await
-                .map_err(|_| ServerErrorKind::WriteFail)?;
-            println!("{:?} bytes sent", len);
+            if !resp.is_empty() {
+                let len = listener
+                    .send_to(&resp, addr)
+                    .await
+                    .map_err(|_| ServerErrorKind::WriteFail)?;
+                println!("{:?} bytes sent", len);
+            }
         }
     }
 }
@@ -142,7 +144,14 @@ impl Default for UnusualDatabaseProgramServer {
 
 impl UnusualDatabaseProgramServer {
     fn process_request(&mut self, msg: &[u8]) -> Vec<u8> {
-        let msg = String::from_utf8(msg.to_vec()).unwrap();
+        let mut msg = String::from_utf8(msg.to_vec()).unwrap();
+
+        // Remove the trailing newline
+        msg = msg
+            .strip_suffix("\r\n")
+            .or(msg.strip_suffix('\n'))
+            .unwrap_or(&msg)
+            .to_string();
 
         let parts = msg.split('=').collect::<Vec<_>>();
 
