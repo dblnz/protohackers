@@ -116,16 +116,14 @@ impl Server for UnusualDatabaseProgramServer {
                 .recv_from(&mut buf)
                 .await
                 .map_err(|_| ServerErrorKind::ReadFail)?;
-            println!("{:?} bytes received from {:?}", len, addr);
 
             let resp = self.process_request(&buf[..len]);
 
             if !resp.is_empty() {
-                let len = listener
+                let _len = listener
                     .send_to(&resp, addr)
                     .await
                     .map_err(|_| ServerErrorKind::WriteFail)?;
-                println!("{:?} bytes sent", len);
             }
         }
     }
@@ -144,14 +142,7 @@ impl Default for UnusualDatabaseProgramServer {
 
 impl UnusualDatabaseProgramServer {
     fn process_request(&mut self, msg: &[u8]) -> Vec<u8> {
-        let mut msg = String::from_utf8(msg.to_vec()).unwrap();
-
-        // Remove the trailing newline
-        msg = msg
-            .strip_suffix("\r\n")
-            .or(msg.strip_suffix('\n'))
-            .unwrap_or(&msg)
-            .to_string();
+        let msg = String::from_utf8(msg.to_vec()).unwrap();
 
         let parts = msg.split('=').collect::<Vec<_>>();
 
@@ -265,5 +256,18 @@ mod test {
 
         assert_eq!(resp, vec![]);
         assert_eq!(server.db.get("version"), Some(&"Ken's Key-Value Store 1.0".to_string()));
+    }
+
+    #[test]
+    fn test_process_request_insert_value_with_newline_success() {
+        let mut server = UnusualDatabaseProgramServer::default();
+
+        let msg = "foo=bar\nbar\n";
+        let resp = server.process_request(msg.as_bytes());
+
+        assert_eq!(resp, vec![]);
+        let resp = server.process_request("foo".as_bytes());
+
+        assert_eq!(resp, msg.as_bytes());
     }
 }

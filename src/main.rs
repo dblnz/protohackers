@@ -1,7 +1,6 @@
 #![deny(warnings)]
 
 use cfg_if::cfg_if;
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
 use server::{Server, ServerErrorKind};
 
@@ -29,13 +28,26 @@ cfg_if! {
     }
 }
 
-// Define the IP and PORT to bind to
-const IP: Ipv4Addr = Ipv4Addr::new(0, 0, 0, 0);
-const PORT: u16 = 8080;
 
 #[tokio::main]
 async fn main() -> Result<(), ServerErrorKind> {
-    let addr = SocketAddr::new(IpAddr::V4(IP), PORT);
+    // define the address to bind to
+    cfg_if! {
+        // Use for UDP server
+        if #[cfg(feature = "s4")] {
+            let addr = "fly-global-services:8080".to_string();
+        }
+        // Use for TCP server
+        else {
+            use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+
+            // Define the IP and PORT to bind to
+            const IP: Ipv4Addr = Ipv4Addr::new(0, 0, 0, 0);
+            const PORT: u16 = 8080;
+
+            let addr = SocketAddr::new(IpAddr::V4(IP), PORT);
+        }
+    }
 
     let mut server = ServerSol::default();
 
