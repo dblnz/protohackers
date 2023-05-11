@@ -21,10 +21,13 @@ cfg_if! {
     } else if #[cfg(feature = "s4")] {
         use s4_unusual_database_program::UnusualDatabaseProgramServer;
         type ServerSol = UnusualDatabaseProgramServer;
+    } else if #[cfg(feature = "s5")] {
+        use s5_mob_in_the_middle::MobInTheMiddleServer;
+        type ServerSol = MobInTheMiddleServer;
     }
     else {
-        use s4_unusual_database_program::UnusualDatabaseProgramServer;
-        type ServerSol = UnusualDatabaseProgramServer;
+        use s5_mob_in_the_middle::MobInTheMiddleServer;
+        type ServerSol = MobInTheMiddleServer;
     }
 }
 
