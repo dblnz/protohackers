@@ -4,6 +4,7 @@ use async_trait::async_trait;
 #[derive(Debug)]
 pub enum ServerErrorKind {
     BindFail,
+    ConnectFail,
     ReadFail,
     WriteFail,
 }
