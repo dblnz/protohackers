@@ -93,6 +93,7 @@ pub struct MobInTheMiddleServer;
 
 #[async_trait]
 impl Server for MobInTheMiddleServer {
+    /// Run the server
     async fn run(&mut self, addr: &str) -> Result<(), ServerErrorKind> {
         let listener = TcpListener::bind(addr)
             .await
@@ -124,46 +125,83 @@ struct ProxyClient;
 
 impl ProxyClient {
     fn new() -> Self {
-        Self { }
+        Self {}
     }
 
+    /// Runs a proxy client
     async fn run(&mut self, stream: TcpStream) -> Result<(), ServerErrorKind> {
         let mut stream = BufStream::new(stream);
         let mut line = vec![];
+        let mut upstream_line = vec![];
         let mut should_continue = true;
+
+        // Connect to the upstream server
+        let upstream = TcpStream::connect("chat.protohackers.com:16963")
+            .await
+            .map_err(|_| ServerErrorKind::ConnectFail)?;
+
+        // Create a buffered stream for the upstream connection
+        let mut upstream = BufStream::new(upstream);
 
         // Loop until no bytes are read
         while should_continue {
-            let read_len = stream
-                .read_until(b'\n', &mut line)
-                .await
-                .map_err(|_| ServerErrorKind::ReadFail)?;
+            // Wait for messages from either the client or the upstream server
+            tokio::select! {
+                // Read a line from the client
+                result = stream.read_until(b'\n', &mut line) => {
+                    let read_len = result.map_err(|_| ServerErrorKind::ReadFail)?;
 
-            if read_len > 0 {
-                // Process the received request/line
-                let response = self.process_request(&line);
+                    if read_len > 0 {
+                        // Process the received request/line and send it to the upstream server
+                        let response = self.process_request(&line);
 
-                // If there's something to send
-                if !response.is_empty() {
-                    // Send back the result
-                    stream
-                        .write_all(&response)
-                        .await
-                        .map_err(|_| ServerErrorKind::WriteFail)?;
+                        // If there's something to send
+                        if !response.is_empty() {
+                            upstream
+                                .write_all(&response)
+                                .await
+                                .map_err(|_| ServerErrorKind::WriteFail)?;
 
-                    // Flush the buffer to ensure it is sent
-                    stream.flush().await.map_err(|_| ServerErrorKind::WriteFail)?;
+                            // Flush the buffer to ensure it is sent
+                            upstream.flush().await.map_err(|_| ServerErrorKind::WriteFail)?;
+                        }
+                    } else {
+                        should_continue = false;
+                    }
+
+                    line.clear();
                 }
-            } else {
-                should_continue = false;
-            }
+                // Read a line from the upstream server
+                result = upstream.read_until(b'\n', &mut upstream_line) => {
+                    let read_len = result.map_err(|_| ServerErrorKind::ReadFail)?;
 
-            line.clear();
+                    if read_len > 0 {
+                        // Process the received request/line and send it to the client
+                        let response = self.process_request(&upstream_line);
+
+                        // If there's something to send
+                        if !response.is_empty() {
+                            stream
+                                .write_all(&response)
+                                .await
+                                .map_err(|_| ServerErrorKind::WriteFail)?;
+
+                            // Flush the buffer to ensure it is sent
+                            stream.flush().await.map_err(|_| ServerErrorKind::WriteFail)?;
+                        }
+                    } else {
+                        should_continue = false;
+                    }
+
+                    upstream_line.clear();
+                }
+            }
         }
 
         Ok(())
     }
 
+    /// Processes a request
     fn process_request(&mut self, request: &[u8]) -> Vec<u8> {
         // Check if the request is a Boguscoin address
         if let Some(address) = self.get_boguscoin_address(request) {
@@ -175,6 +213,7 @@ impl ProxyClient {
         }
     }
 
+    /// Extracts a Boguscoin address from a request
     fn get_boguscoin_address(&self, request: &[u8]) -> Option<Vec<u8>> {
         // Convert the request to a string
         let request = String::from_utf8_lossy(request);
@@ -182,9 +221,11 @@ impl ProxyClient {
         // Check if the request is a Boguscoin address
         request
             .split_whitespace()
-            .find(|word| word.starts_with('7') && word.len() >= 26 && word.len() <= 35).map(|address| address.as_bytes().to_vec())
+            .find(|word| word.starts_with('7') && word.len() >= 26 && word.len() <= 35)
+            .map(|address| address.as_bytes().to_vec())
     }
 
+    /// Replaces a Boguscoin address with Tony's address
     fn replace_boguscoin_address(&mut self, request: &[u8], address: Vec<u8>) -> Vec<u8> {
         // Convert the request to a string
         let request = String::from_utf8_lossy(request);
@@ -199,7 +240,6 @@ impl ProxyClient {
         response.as_bytes().to_vec()
     }
 }
-
 
 #[cfg(test)]
 mod test {
