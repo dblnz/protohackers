@@ -11,9 +11,16 @@ Use `cargo` to build the Rust solution by providing the desired solution as foll
 cargo build --release --features s0
 ```
 
-Where features can be the implemented solution number: s0 or s1
+Use `docker` to create an image containing the solution
 
-## Deploy to [Fly.io](https://fly.io/) 
+```bash
+# Example to build solution 0: Smoke Test
+docker build . -t protohackers --build-arg="SOL=s0"
+```
+
+Where features can be the implemented solution number
+
+## Deploy to [Fly.io](https://fly.io/)
 
 ```bash
 # Install flyctl
