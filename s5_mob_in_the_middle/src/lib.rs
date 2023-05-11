@@ -204,25 +204,27 @@ impl ProxyClient {
     /// Processes a request
     fn process_request(&mut self, request: &[u8]) -> Vec<u8> {
         // Check if the request is a Boguscoin address
-        if let Some(address) = self.get_boguscoin_address(request) {
+        let mut request = request.to_vec();
+
+        for address in self.get_boguscoin_address(&request) {
             // If it is, replace it with Tony's address
-            self.replace_boguscoin_address(request, address)
-        } else {
-            // Otherwise, return the request as is
-            request.to_vec()
+            request = self.replace_boguscoin_address(&request, address);
         }
+
+        request
     }
 
     /// Extracts a Boguscoin address from a request
-    fn get_boguscoin_address(&self, request: &[u8]) -> Option<Vec<u8>> {
+    fn get_boguscoin_address(&self, request: &[u8]) -> Vec<Vec<u8>> {
         // Convert the request to a string
         let request = String::from_utf8_lossy(request);
 
         // Check if the request is a Boguscoin address
         request
             .split_whitespace()
-            .find(|word| word.starts_with('7') && word.len() >= 26 && word.len() <= 35)
+            .filter(|word| word.starts_with('7') && word.len() >= 26 && word.len() <= 35)
             .map(|address| address.as_bytes().to_vec())
+            .collect()
     }
 
     /// Replaces a Boguscoin address with Tony's address
@@ -251,9 +253,9 @@ mod test {
 
         let request = b"Hi alice, please send payment to 7iKDZEwPZSqIvDnHvVN2r0hUWXD5rHX";
 
-        let address = proxy_client.get_boguscoin_address(request).unwrap();
+        let address = proxy_client.get_boguscoin_address(request);
 
-        assert_eq!(address, b"7iKDZEwPZSqIvDnHvVN2r0hUWXD5rHX");
+        assert_eq!(address, vec![b"7iKDZEwPZSqIvDnHvVN2r0hUWXD5rHX"]);
     }
 
     #[test]
@@ -262,9 +264,9 @@ mod test {
 
         let request = b"7iKDZEwPZSqIvDnHvVN2r0hUWXD5rHX";
 
-        let address = proxy_client.get_boguscoin_address(request).unwrap();
+        let address = proxy_client.get_boguscoin_address(request);
 
-        assert_eq!(address, b"7iKDZEwPZSqIvDnHvVN2r0hUWXD5rHX");
+        assert_eq!(address, vec![b"7iKDZEwPZSqIvDnHvVN2r0hUWXD5rHX"]);
     }
 
     #[test]
@@ -273,9 +275,9 @@ mod test {
 
         let request = b" 7iKDZEwPZSqIvDnHvVN2r0hUWXD5rHX ";
 
-        let address = proxy_client.get_boguscoin_address(request).unwrap();
+        let address = proxy_client.get_boguscoin_address(request);
 
-        assert_eq!(address, b"7iKDZEwPZSqIvDnHvVN2r0hUWXD5rHX");
+        assert_eq!(address, vec![b"7iKDZEwPZSqIvDnHvVN2r0hUWXD5rHX"]);
     }
 
     #[test]
@@ -286,7 +288,7 @@ mod test {
 
         let address = proxy_client.get_boguscoin_address(request);
 
-        assert!(address.is_none());
+        assert!(address.is_empty());
     }
 
     #[test]
@@ -297,6 +299,37 @@ mod test {
 
         let address = proxy_client.get_boguscoin_address(request);
 
-        assert!(address.is_none());
+        assert!(address.is_empty());
+    }
+
+    #[test]
+    fn test_get_multiple_boguscoin_addresses_success() {
+        let proxy_client = ProxyClient::new();
+
+        let request = b"Hi alice, please send payment to 7iKDZEwPZSqIvDnHvVN2r0hUWXD5rHX or 7iKDZEwPZSqIvDnHvVN2r0hUWXD5rHY";
+
+        let address = proxy_client.get_boguscoin_address(request);
+
+        assert_eq!(
+            address,
+            vec![
+                b"7iKDZEwPZSqIvDnHvVN2r0hUWXD5rHX",
+                b"7iKDZEwPZSqIvDnHvVN2r0hUWXD5rHY"
+            ]
+        );
+    }
+
+    #[test]
+    fn test_process_request_same_address_three_times_success() {
+        let mut proxy_client = ProxyClient::new();
+
+        let request = b"Please pay the ticket price of 15 Boguscoins to one of these addresses: 7pKIoehdvl0rDwzM5Alx5LadEG2M 7pKIoehdvl0rDwzM5AlP5LZEG2M 7gsqcHYJ2HCvxgOlVWN4YTDHNybbDpYoZ";
+
+        let response = proxy_client.process_request(request);
+
+        assert_eq!(
+            String::from_utf8(response).unwrap(),
+            "Please pay the ticket price of 15 Boguscoins to one of these addresses: 7YWHMfk9JZe0LM0g1ZauHuiSxhI 7YWHMfk9JZe0LM0g1ZauHuiSxhI 7YWHMfk9JZe0LM0g1ZauHuiSxhI".to_string()
+        );
     }
 }
