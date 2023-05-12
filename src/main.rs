@@ -24,10 +24,13 @@ cfg_if! {
     } else if #[cfg(feature = "s5")] {
         use s5_mob_in_the_middle::MobInTheMiddleServer;
         type ServerSol = MobInTheMiddleServer;
+    } else if #[cfg(feature = "s6")] {
+        use s6_speed_daemon::SpeedDaemonServer;
+        type ServerSol = SpeedDaemonServer;
     }
     else {
-        use s5_mob_in_the_middle::MobInTheMiddleServer;
-        type ServerSol = MobInTheMiddleServer;
+        use s6_speed_daemon::SpeedDaemonServer;
+        type ServerSol = SpeedDaemonServer;
     }
 }
 
