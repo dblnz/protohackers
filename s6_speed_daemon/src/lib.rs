@@ -399,6 +399,41 @@ pub struct SpeedDaemonServer;
 impl Server for SpeedDaemonServer {
     /// Run the server
     async fn run(&mut self, addr: &str) -> Result<(), ServerErrorKind> {
+        let listener = TcpListener::bind(addr)
+            .await
+            .map_err(|_| ServerErrorKind::BindFail)?;
+
+        println!("Listening on {:?}", addr);
+
+        loop {
+            println!("Waiting for connection ...");
+
+            // The second item contains the IP and port of the new connection.
+            let (stream, _) = listener.accept().await.unwrap();
+
+            println!("Connection open\n");
+
+            // A new task is spawned for each inbound socket. The socket is
+            // moved to the new task and processed there.
+            tokio::spawn(async move {
+                let mut client = Client::new();
+
+                client.run(stream).await
+            });
+        }
+    }
+}
+
+
+#[derive(Debug)]
+struct Client;
+
+impl Client {
+    fn new() -> Self {
+        Self
+    }
+
+    async fn run(&mut self, _stream: TcpStream) -> Result<(), ServerErrorKind> {
         Ok(())
     }
 }
