@@ -1,4 +1,6 @@
 use async_trait::async_trait;
+use std::collections::HashMap;
+use std::net::SocketAddr;
 use std::sync::Arc;
 
 use server::{Server, ServerErrorKind};
@@ -393,7 +395,9 @@ use tokio::sync::{mpsc, Mutex};
 ///  with an incorrect speed.
 /// Fortunately nobody on Freedom Island has a fast enough car, so you don't need to worry about it.
 #[derive(Debug, Default)]
-pub struct SpeedDaemonServer;
+pub struct SpeedDaemonServer {
+    clients: Arc<Mutex<HashMap<SocketAddr, ClientType>>>,
+}
 
 #[async_trait]
 impl Server for SpeedDaemonServer {
@@ -409,31 +413,118 @@ impl Server for SpeedDaemonServer {
             println!("Waiting for connection ...");
 
             // The second item contains the IP and port of the new connection.
-            let (stream, _) = listener.accept().await.unwrap();
+            let (stream, addr) = listener.accept().await.unwrap();
 
             println!("Connection open\n");
+
+            let clients = self.clients.clone();
 
             // A new task is spawned for each inbound socket. The socket is
             // moved to the new task and processed there.
             tokio::spawn(async move {
-                let mut client = Client::new();
+                let mut client = Client::new(clients);
 
-                client.run(stream).await
+                client.run(addr, stream).await
             });
         }
     }
 }
 
+#[derive(Debug, Default)]
+enum ClientType {
+    #[default]
+    Unkwown,
+    Camera,
+    Dispatcher,
+}
 
 #[derive(Debug)]
-struct Client;
+struct ClientInfo {
+    client_type: ClientType,
+    tx: mpsc::UnboundedSender<Vec<u8>>,
+}
+
+impl ClientInfo {
+    fn new(client_type: ClientType, tx: mpsc::UnboundedSender<Vec<u8>>) -> Self {
+        Self {
+            client_type,
+            tx,
+        }
+    }
+}
+
+#[derive(Debug)]
+struct Client {
+    clients: Arc<Mutex<HashMap<SocketAddr, ClientType>>>,
+}
 
 impl Client {
-    fn new() -> Self {
-        Self
+    fn new(clients: Arc<Mutex<HashMap<SocketAddr, ClientType>>>) -> Self {
+        Self {
+            clients,
+        }
     }
 
-    async fn run(&mut self, _stream: TcpStream) -> Result<(), ServerErrorKind> {
+    async fn run(&mut self, addr: SocketAddr, stream: TcpStream) -> Result<(), ServerErrorKind> {
+        let mut cliet_type = ClientType::Unkwown;
+        let mut stream = BufStream::new(stream);
+        let mut line = vec![];
+        let mut should_continue = true;
+
+        let (tx, mut rx) = mpsc::unbounded_channel::<Vec<u8>>();
+
+        // Store the client info
+        self.clients.lock().await.insert(addr, cliet_type);
+
+        while should_continue {
+            tokio::select! {
+                // If there is a message from a peer
+                Some(msg) = rx.recv() => {
+                    if !msg.is_empty() {
+                        // Send the message to the other end
+                        stream
+                            .write_all(&msg)
+                            .await
+                            .map_err(|_| ServerErrorKind::WriteFail)?;
+
+                        // Flush the buffer to ensure it is sent
+                        stream.flush().await.map_err(|_| ServerErrorKind::WriteFail)?;
+                    }
+                }
+                // If there's a request incoming
+                result = stream.read_until(b'\n', &mut line) => {
+                    let read_len = result.map_err(|_| ServerErrorKind::ReadFail)?;
+
+                    if read_len > 0 {
+                        // Process the received request/line
+                        let response = self.process_request(&line);
+
+                        // If there's something to send
+                        if !response.is_empty() {
+                            // Send back the result
+                            stream
+                                .write_all(&response)
+                                .await
+                                .map_err(|_| ServerErrorKind::WriteFail)?;
+
+                            // Flush the buffer to ensure it is sent
+                            stream.flush().await.map_err(|_| ServerErrorKind::WriteFail)?;
+                        }
+                    } else {
+                        should_continue = false;
+                    }
+
+                    line.clear();
+                }
+            }
+        }
+
         Ok(())
+    }
+
+    fn process_request(&mut self, request: &[u8]) -> Vec<u8> {
+        let mut request = request.to_vec();
+
+        request
     }
 }
