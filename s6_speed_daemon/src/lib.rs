@@ -397,6 +397,8 @@ use tokio::sync::{mpsc, Mutex};
 #[derive(Debug, Default)]
 pub struct SpeedDaemonServer {
     clients: Arc<Mutex<HashMap<SocketAddr, ClientType>>>,
+    cameras: Arc<Mutex<HashMap<u16, ClientInfo>>>,
+    dispatchers: Arc<Mutex<HashMap<u16, ClientInfo>>>,
 }
 
 #[async_trait]
@@ -418,11 +420,13 @@ impl Server for SpeedDaemonServer {
             println!("Connection open\n");
 
             let clients = self.clients.clone();
+            let cameras = self.cameras.clone();
+            let dispatchers = self.dispatchers.clone();
 
             // A new task is spawned for each inbound socket. The socket is
             // moved to the new task and processed there.
             tokio::spawn(async move {
-                let mut client = Client::new(clients);
+                let mut client = Client::new(clients, cameras, dispatchers);
 
                 client.run(addr, stream).await
             });
@@ -446,22 +450,27 @@ struct ClientInfo {
 
 impl ClientInfo {
     fn new(client_type: ClientType, tx: mpsc::UnboundedSender<Vec<u8>>) -> Self {
-        Self {
-            client_type,
-            tx,
-        }
+        Self { client_type, tx }
     }
 }
 
 #[derive(Debug)]
 struct Client {
     clients: Arc<Mutex<HashMap<SocketAddr, ClientType>>>,
+    cameras: Arc<Mutex<HashMap<u16, ClientInfo>>>,
+    dispatchers: Arc<Mutex<HashMap<u16, ClientInfo>>>,
 }
 
 impl Client {
-    fn new(clients: Arc<Mutex<HashMap<SocketAddr, ClientType>>>) -> Self {
+    fn new(
+        clients: Arc<Mutex<HashMap<SocketAddr, ClientType>>>,
+        cameras: Arc<Mutex<HashMap<u16, ClientInfo>>>,
+        dispatchers: Arc<Mutex<HashMap<u16, ClientInfo>>>,
+    ) -> Self {
         Self {
             clients,
+            cameras,
+            dispatchers,
         }
     }
 

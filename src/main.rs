@@ -34,7 +34,6 @@ cfg_if! {
     }
 }
 
-
 #[tokio::main]
 async fn main() -> Result<(), ServerErrorKind> {
     // define the address to bind to
