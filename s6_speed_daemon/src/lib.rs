@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use tokio::sync::mpsc::UnboundedSender;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -411,6 +412,22 @@ impl Server for SpeedDaemonServer {
 
         println!("Listening on {:?}", addr);
 
+        let clients = self.clients.clone();
+        let cameras = self.cameras.clone();
+        let dispatchers = self.dispatchers.clone();
+
+        let (tx, rx) = mpsc::unbounded_channel::<InternalMessage>();
+
+        let tx = Arc::new(Mutex::new(tx));
+
+        // A new task is spawned for processing
+        tokio::spawn(async move {
+            println!("Processing thread started ...");
+            let mut consumer = ProxyConsumer::new(clients, cameras, dispatchers);
+
+            consumer.run(rx).await
+        });
+
         loop {
             println!("Waiting for connection ...");
 
@@ -422,15 +439,58 @@ impl Server for SpeedDaemonServer {
             let clients = self.clients.clone();
             let cameras = self.cameras.clone();
             let dispatchers = self.dispatchers.clone();
+            let consumer = tx.clone();
 
             // A new task is spawned for each inbound socket. The socket is
             // moved to the new task and processed there.
             tokio::spawn(async move {
                 let mut client = Client::new(clients, cameras, dispatchers);
 
-                client.run(addr, stream).await
+                client.run(consumer, addr, stream).await
             });
         }
+    }
+}
+
+#[derive(Debug)]
+enum InternalMessage {
+    NewClient,
+}
+
+#[derive(Debug)]
+struct ProxyConsumer {
+    clients: Arc<Mutex<HashMap<SocketAddr, ClientType>>>,
+    cameras: Arc<Mutex<HashMap<u16, ClientInfo>>>,
+    dispatchers: Arc<Mutex<HashMap<u16, ClientInfo>>>,
+}
+
+impl ProxyConsumer {
+    fn new(
+        clients: Arc<Mutex<HashMap<SocketAddr, ClientType>>>,
+        cameras: Arc<Mutex<HashMap<u16, ClientInfo>>>,
+        dispatchers: Arc<Mutex<HashMap<u16, ClientInfo>>>,
+    ) -> Self {
+        Self {
+            clients,
+            cameras,
+            dispatchers,
+        }
+    }
+
+    async fn run(&mut self, rx: mpsc::UnboundedReceiver<InternalMessage>) -> Result<(), ServerErrorKind> {
+        let mut rx = rx;
+
+        while let Some(msg) = rx.recv().await {
+            match msg {
+                InternalMessage::NewClient => {
+                    dbg!("New client");
+                }
+            }
+        }
+
+        dbg!("Processing thread finished ...");
+
+        Ok(())
     }
 }
 
@@ -474,30 +534,40 @@ impl Client {
         }
     }
 
-    async fn run(&mut self, addr: SocketAddr, stream: TcpStream) -> Result<(), ServerErrorKind> {
+    async fn run(
+        &mut self,
+        consumer: Arc<Mutex<UnboundedSender<InternalMessage>>>,
+        addr: SocketAddr,
+        stream: TcpStream) -> Result<(), ServerErrorKind> {
+
         let mut cliet_type = ClientType::Unkwown;
         let mut stream = BufStream::new(stream);
         let mut line = vec![];
         let mut should_continue = true;
 
-        let (tx, mut rx) = mpsc::unbounded_channel::<Vec<u8>>();
+        let (tx, mut rx) = mpsc::unbounded_channel::<InternalMessage>();
 
         // Store the client info
         self.clients.lock().await.insert(addr, cliet_type);
+
+        // Send a message to the consumer
+        consumer.lock().await.send(InternalMessage::NewClient).unwrap();
 
         while should_continue {
             tokio::select! {
                 // If there is a message from a peer
                 Some(msg) = rx.recv() => {
-                    if !msg.is_empty() {
-                        // Send the message to the other end
-                        stream
-                            .write_all(&msg)
-                            .await
-                            .map_err(|_| ServerErrorKind::WriteFail)?;
+                    match msg {
+                        InternalMessage::NewClient => {
+                            // Send the message to the other end
+                            stream
+                                .write_all(&line)
+                                .await
+                                .map_err(|_| ServerErrorKind::WriteFail)?;
 
-                        // Flush the buffer to ensure it is sent
-                        stream.flush().await.map_err(|_| ServerErrorKind::WriteFail)?;
+                            // Flush the buffer to ensure it is sent
+                            stream.flush().await.map_err(|_| ServerErrorKind::WriteFail)?;
+                        }
                     }
                 }
                 // If there's a request incoming
@@ -527,6 +597,8 @@ impl Client {
                 }
             }
         }
+
+        dbg!("Connection closed: {}", addr);
 
         Ok(())
     }
