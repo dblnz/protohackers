@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use tokio::sync::mpsc::UnboundedSender;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::net::SocketAddr;
 use std::sync::Arc;
 
@@ -397,6 +397,7 @@ use tokio::sync::{mpsc, Mutex};
 /// Fortunately nobody on Freedom Island has a fast enough car, so you don't need to worry about it.
 #[derive(Debug, Default)]
 pub struct SpeedDaemonServer {
+    messages: Arc<Mutex<VecDeque<MessageType>>>,
     clients: Arc<Mutex<HashMap<SocketAddr, ClientType>>>,
     cameras: Arc<Mutex<HashMap<u16, ClientInfo>>>,
     dispatchers: Arc<Mutex<HashMap<u16, ClientInfo>>>,
@@ -412,6 +413,7 @@ impl Server for SpeedDaemonServer {
 
         println!("Listening on {:?}", addr);
 
+        let messages = self.messages.clone();
         let clients = self.clients.clone();
         let cameras = self.cameras.clone();
         let dispatchers = self.dispatchers.clone();
@@ -425,7 +427,7 @@ impl Server for SpeedDaemonServer {
             println!("Processing thread started ...");
             let mut consumer = ProxyConsumer::new(clients, cameras, dispatchers);
 
-            consumer.run(rx).await
+            consumer.run(rx, messages).await
         });
 
         loop {
@@ -436,6 +438,7 @@ impl Server for SpeedDaemonServer {
 
             println!("Connection open\n");
 
+            let messages = self.messages.clone();
             let clients = self.clients.clone();
             let cameras = self.cameras.clone();
             let dispatchers = self.dispatchers.clone();
@@ -446,7 +449,7 @@ impl Server for SpeedDaemonServer {
             tokio::spawn(async move {
                 let mut client = Client::new(clients, cameras, dispatchers);
 
-                client.run(consumer, addr, stream).await
+                client.run(consumer, messages, addr, stream).await
             });
         }
     }
@@ -455,6 +458,8 @@ impl Server for SpeedDaemonServer {
 #[derive(Debug)]
 enum InternalMessage {
     NewClient,
+    ErrorMessage,
+
 }
 
 #[derive(Debug)]
@@ -477,13 +482,16 @@ impl ProxyConsumer {
         }
     }
 
-    async fn run(&mut self, rx: mpsc::UnboundedReceiver<InternalMessage>) -> Result<(), ServerErrorKind> {
+    async fn run(&mut self, rx: mpsc::UnboundedReceiver<InternalMessage>, messages: Arc<Mutex<VecDeque<MessageType>>>) -> Result<(), ServerErrorKind> {
         let mut rx = rx;
 
         while let Some(msg) = rx.recv().await {
             match msg {
                 InternalMessage::NewClient => {
                     dbg!("New client");
+                }
+                InternalMessage::ErrorMessage => {
+                    dbg!("Error message");
                 }
             }
         }
@@ -537,10 +545,11 @@ impl Client {
     async fn run(
         &mut self,
         consumer: Arc<Mutex<UnboundedSender<InternalMessage>>>,
+        messages: Arc<Mutex<VecDeque<MessageType>>>,
         addr: SocketAddr,
         stream: TcpStream) -> Result<(), ServerErrorKind> {
 
-        let mut cliet_type = ClientType::Unkwown;
+        let mut client_type = ClientType::Unkwown;
         let mut stream = BufStream::new(stream);
         let mut line = vec![];
         let mut should_continue = true;
@@ -548,7 +557,7 @@ impl Client {
         let (tx, mut rx) = mpsc::unbounded_channel::<InternalMessage>();
 
         // Store the client info
-        self.clients.lock().await.insert(addr, cliet_type);
+        self.clients.lock().await.insert(addr, client_type);
 
         // Send a message to the consumer
         consumer.lock().await.send(InternalMessage::NewClient).unwrap();
@@ -557,17 +566,27 @@ impl Client {
             tokio::select! {
                 // If there is a message from a peer
                 Some(msg) = rx.recv() => {
-                    match msg {
+                    let response = match msg {
                         InternalMessage::NewClient => {
-                            // Send the message to the other end
-                            stream
-                                .write_all(&line)
-                                .await
-                                .map_err(|_| ServerErrorKind::WriteFail)?;
-
-                            // Flush the buffer to ensure it is sent
-                            stream.flush().await.map_err(|_| ServerErrorKind::WriteFail)?;
+                            vec![]
                         }
+                        _ => {
+                            vec![]
+                        }
+                    };
+
+                    if !response.is_empty() {
+                        // Send the message to the other end
+                        stream
+                            .write_all(&response)
+                            .await
+                            .map_err(|_| ServerErrorKind::WriteFail)?;
+
+                        // Flush the buffer to ensure it is sent
+                        stream
+                            .flush()
+                            .await
+                            .map_err(|_| ServerErrorKind::WriteFail)?;
                     }
                 }
                 // If there's a request incoming
@@ -576,18 +595,8 @@ impl Client {
 
                     if read_len > 0 {
                         // Process the received request/line
-                        let response = self.process_request(&line);
-
-                        // If there's something to send
-                        if !response.is_empty() {
-                            // Send back the result
-                            stream
-                                .write_all(&response)
-                                .await
-                                .map_err(|_| ServerErrorKind::WriteFail)?;
-
-                            // Flush the buffer to ensure it is sent
-                            stream.flush().await.map_err(|_| ServerErrorKind::WriteFail)?;
+                        if let Some(msg) = MessageType::from_bytes(&line) {
+                            messages.lock().await.push_back(msg);
                         }
                     } else {
                         should_continue = false;
@@ -602,10 +611,60 @@ impl Client {
 
         Ok(())
     }
+}
 
-    fn process_request(&mut self, request: &[u8]) -> Vec<u8> {
-        let mut request = request.to_vec();
 
-        request
+#[derive(Debug)]
+enum MessageType {
+    Error(String),
+}
+
+impl MessageType {
+    fn from_bytes(msg: &[u8]) -> Option<Self> {
+        let mut msg_iter = msg.iter();
+
+        match msg_iter.next() {
+            // Error
+            Some(0x10_u8) => {
+                let str_len = msg_iter.next().unwrap();
+                let s = String::from_utf8(msg_iter.take(*str_len as usize).cloned().collect()).unwrap();
+
+                Some(MessageType::Error(s))
+            }
+
+            // Unknown
+            Some(_) | None => {
+                None
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_message_type_from_bytes_error_success() {
+        let msg = vec![0x10, 0x05, 0x48, 0x65, 0x6c, 0x6c, 0x6f];
+        let msg_type = MessageType::from_bytes(&msg);
+
+        assert!(matches!(msg_type, Some(MessageType::Error(_))));
+    }
+
+    #[test]
+    fn test_message_type_from_bytes_unknown_type_fail() {
+        let msg = vec![0x11, 0x05, 0x48, 0x65, 0x6c, 0x6c, 0x6f];
+        let msg_type = MessageType::from_bytes(&msg);
+
+        assert!(matches!(msg_type, None));
+    }
+
+    #[test]
+    fn test_message_type_from_bytes_error_invalid_length_fail() {
+        let msg = vec![0x10, 0x06, 0x48, 0x65, 0x6c, 0x6c, 0x6f];
+        let msg_type = MessageType::from_bytes(&msg);
+
+        assert!(matches!(msg_type, None));
     }
 }
