@@ -1,8 +1,8 @@
 use async_trait::async_trait;
-use tokio::sync::mpsc::UnboundedSender;
 use std::collections::{HashMap, VecDeque};
 use std::net::SocketAddr;
 use std::sync::Arc;
+use tokio::sync::mpsc::UnboundedSender;
 
 use server::{Server, ServerErrorKind};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufStream};
@@ -459,7 +459,6 @@ impl Server for SpeedDaemonServer {
 enum InternalMessage {
     NewClient,
     ErrorMessage,
-
 }
 
 #[derive(Debug)]
@@ -482,7 +481,11 @@ impl ProxyConsumer {
         }
     }
 
-    async fn run(&mut self, rx: mpsc::UnboundedReceiver<InternalMessage>, messages: Arc<Mutex<VecDeque<MessageType>>>) -> Result<(), ServerErrorKind> {
+    async fn run(
+        &mut self,
+        rx: mpsc::UnboundedReceiver<InternalMessage>,
+        messages: Arc<Mutex<VecDeque<MessageType>>>,
+    ) -> Result<(), ServerErrorKind> {
         let mut rx = rx;
 
         while let Some(msg) = rx.recv().await {
@@ -547,8 +550,8 @@ impl Client {
         consumer: Arc<Mutex<UnboundedSender<InternalMessage>>>,
         messages: Arc<Mutex<VecDeque<MessageType>>>,
         addr: SocketAddr,
-        stream: TcpStream) -> Result<(), ServerErrorKind> {
-
+        stream: TcpStream,
+    ) -> Result<(), ServerErrorKind> {
         let mut client_type = ClientType::Unkwown;
         let mut stream = BufStream::new(stream);
         let mut line = vec![];
@@ -560,7 +563,11 @@ impl Client {
         self.clients.lock().await.insert(addr, client_type);
 
         // Send a message to the consumer
-        consumer.lock().await.send(InternalMessage::NewClient).unwrap();
+        consumer
+            .lock()
+            .await
+            .send(InternalMessage::NewClient)
+            .unwrap();
 
         while should_continue {
             tokio::select! {
@@ -595,7 +602,7 @@ impl Client {
 
                     if read_len > 0 {
                         // Process the received request/line
-                        if let Some(msg) = MessageType::from_bytes(&line) {
+                        if let Ok(msg) = MessageType::from_bytes(&line) {
                             messages.lock().await.push_back(msg);
                         }
                     } else {
@@ -613,29 +620,122 @@ impl Client {
     }
 }
 
-
 #[derive(Debug)]
 enum MessageType {
     Error(String),
+    Plate(String, u32),
+    Ticket(String, u16, u16, u32, u16, u32, u16),
+    WantHeartbeat(u32),
+    Heartbeat,
+    IAmCamera(u16, u16, u16),
+    IAmDispatcher(u8, Vec<u16>),
 }
 
 impl MessageType {
-    fn from_bytes(msg: &[u8]) -> Option<Self> {
-        let mut msg_iter = msg.iter();
+    fn from_bytes(msg: &[u8]) -> Result<Self, String> {
+        let mut offset = 0;
 
-        match msg_iter.next() {
+        match msg[offset] {
             // Error
-            Some(0x10_u8) => {
-                let str_len = msg_iter.next().unwrap();
-                let s = String::from_utf8(msg_iter.take(*str_len as usize).cloned().collect()).unwrap();
-
-                Some(MessageType::Error(s))
+            0x10 => {
+                Ok(MessageType::Error(Self::get_str(&msg[1..])?))
             }
+            // Plate
+            0x20 => {
+                let plate = Self::get_str(&msg[1..])?;
+                let timestamp = Self::get_u32(&msg[2+plate.len()..])?;
 
+                Ok(MessageType::Plate(plate, timestamp))
+            }
+            // Ticket
+            0x21 => {
+                offset += 1;
+                let plate = Self::get_str(&msg[offset..])?;
+                offset += 1 + plate.len();
+                let road = Self::get_u16(&msg[offset..])?;
+                offset += 2;
+                let mile1 = Self::get_u16(&msg[offset..])?;
+                offset += 2;
+                let timestamp1 = Self::get_u32(&msg[offset..])?;
+                offset += 4;
+                let mile2 = Self::get_u16(&msg[offset..])?;
+                offset += 2;
+                let timestamp2 = Self::get_u32(&msg[offset..])?;
+                offset += 4;
+                let speed = Self::get_u16(&msg[offset..])?;
+
+                Ok(Self::Ticket(plate, road, mile1, timestamp1, mile2, timestamp2, speed))
+            }
+            // WantHeartbeat
+            0x40 => {
+                let interval = Self::get_u32(&msg[1..])?;
+
+                Ok(Self::WantHeartbeat(interval))
+            }
+            // Heartbeat
+            0x41 => {
+                Ok(Self::Heartbeat)
+            }
+            // IAmCamera
+            0x80 => {
+                let road = Self::get_u16(&msg[1..])?;
+                let mile = Self::get_u16(&msg[4..])?;
+                let limit = Self::get_u16(&msg[7..])?;
+
+                Ok(Self::IAmCamera(road, mile, limit))
+            }
+            // IAmDispatcher
+            0x81 => {
+                let numroads = Self::get_u8(&msg[1..])?;
+                let mut roads = vec![];
+
+                for i in 0..numroads {
+                    roads.push(Self::get_u16(&msg[(2 + 2*i as usize)..])?);
+                }
+
+                Ok(Self::IAmDispatcher(numroads, roads))
+            }
             // Unknown
-            Some(_) | None => {
-                None
-            }
+            _ => Err("Unknown message type".to_string()),
+        }
+    }
+
+    fn get_u8(msg: &[u8]) -> Result<u8, String> {
+        if msg.len() >= 1 {
+            Ok(msg[0])
+        }
+        else {
+            Err(format!("Invalid length"))
+        }
+    }
+
+    fn get_u16(msg: &[u8]) -> Result<u16, String> {
+        if msg.len() >= 2 {
+            Ok(u16::from_be_bytes(msg[0..2].try_into().map_err(|_| "Cannot convert slice into array")?))
+        }
+        else {
+            Err(format!("Invalid length"))
+        }
+    }
+
+    fn get_u32(msg: &[u8]) -> Result<u32, String> {
+        if msg.len() >= 4 {
+            Ok(u32::from_be_bytes(msg[0..4].try_into().map_err(|_| "Cannot convert slice into array")?))
+        }
+        else {
+            Err(format!("Invalid length"))
+        }
+    }
+
+    fn get_str(msg: &[u8]) -> Result<String, String> {
+        let str_len = Self::get_u8(msg)? as usize;
+        if msg.len() >= 1 + str_len as usize {
+            let s = String::from_utf8(msg[1..str_len + 1].to_vec()).map_err(|_| "Cannot get str")?;
+
+            Ok(s)
+        }
+        else {
+            Err(format!("Invalid length"))
         }
     }
 }
@@ -649,7 +749,7 @@ mod test {
         let msg = vec![0x10, 0x05, 0x48, 0x65, 0x6c, 0x6c, 0x6f];
         let msg_type = MessageType::from_bytes(&msg);
 
-        assert!(matches!(msg_type, Some(MessageType::Error(_))));
+        assert!(matches!(msg_type, Ok(MessageType::Error(_))));
     }
 
     #[test]
@@ -657,7 +757,7 @@ mod test {
         let msg = vec![0x11, 0x05, 0x48, 0x65, 0x6c, 0x6c, 0x6f];
         let msg_type = MessageType::from_bytes(&msg);
 
-        assert!(matches!(msg_type, None));
+        assert!(msg_type.is_err());
     }
 
     #[test]
@@ -665,6 +765,6 @@ mod test {
         let msg = vec![0x10, 0x06, 0x48, 0x65, 0x6c, 0x6c, 0x6f];
         let msg_type = MessageType::from_bytes(&msg);
 
-        assert!(matches!(msg_type, None));
+        assert!(msg_type.is_err());
     }
 }
