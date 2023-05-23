@@ -620,7 +620,7 @@ impl Client {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 enum MessageType {
     Error(String),
     Plate(String, u32),
@@ -766,5 +766,13 @@ mod test {
         let msg_type = MessageType::from_bytes(&msg);
 
         assert!(msg_type.is_err());
+    }
+
+    #[test]
+    fn test_message_type_from_bytes_plate_success() {
+        let msg = vec![0x20, 0x04, b'T', b'L', b'9', b'5', 0x00, 0x00, 0x00, 0x10];
+        let msg_type = MessageType::from_bytes(&msg).expect("Unable to parse message");
+
+        assert_eq!(msg_type, MessageType::Plate("TL95".to_string(), 0x10));
     }
 }
