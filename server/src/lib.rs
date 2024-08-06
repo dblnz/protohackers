@@ -7,6 +7,8 @@ pub enum ServerErrorKind {
     ConnectFail,
     ReadFail,
     WriteFail,
+    UnknownClient,
+    ServerParseFail,
 }
 
 #[async_trait]

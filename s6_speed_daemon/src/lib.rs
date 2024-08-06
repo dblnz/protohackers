@@ -1,11 +1,13 @@
+mod ClientConnection;
+
+use ClientConnection::GenericClient;
 use async_trait::async_trait;
 use std::collections::{HashMap, VecDeque};
-use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::mpsc::UnboundedSender;
 
 use server::{Server, ServerErrorKind};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufStream};
+use tokio::io::{AsyncReadExt, AsyncWriteExt, BufStream};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{mpsc, Mutex};
 
@@ -397,10 +399,10 @@ use tokio::sync::{mpsc, Mutex};
 /// Fortunately nobody on Freedom Island has a fast enough car, so you don't need to worry about it.
 #[derive(Debug, Default)]
 pub struct SpeedDaemonServer {
-    messages: Arc<Mutex<VecDeque<MessageType>>>,
-    clients: Arc<Mutex<HashMap<SocketAddr, ClientType>>>,
-    cameras: Arc<Mutex<HashMap<u16, ClientInfo>>>,
-    dispatchers: Arc<Mutex<HashMap<u16, ClientInfo>>>,
+    // messages: Arc<Mutex<VecDeque<MessageType>>>,
+    // clients: Arc<Mutex<HashMap<SocketAddr, ClientType>>>,
+    // cameras: Arc<Mutex<HashMap<u16, UnboundedSender<Vec<u8>> >>>,
+    // dispatchers: Arc<Mutex<HashMap<u16, UnboundedSender<Vec<u8>>>>>,
 }
 
 #[async_trait]
@@ -413,10 +415,10 @@ impl Server for SpeedDaemonServer {
 
         println!("Listening on {:?}", addr);
 
-        let messages = self.messages.clone();
-        let clients = self.clients.clone();
-        let cameras = self.cameras.clone();
-        let dispatchers = self.dispatchers.clone();
+        // let messages = self.messages.clone();
+        // let clients = self.clients.clone();
+        // let cameras = self.cameras.clone();
+        // let dispatchers = self.dispatchers.clone();
 
         let (tx, rx) = mpsc::unbounded_channel::<InternalMessage>();
 
@@ -425,9 +427,16 @@ impl Server for SpeedDaemonServer {
         // A new task is spawned for processing
         tokio::spawn(async move {
             println!("Processing thread started ...");
-            let mut consumer = ProxyConsumer::new(clients, cameras, dispatchers);
+            let mut consumer = ProxyConsumer::new(
+                // clients,
+                // cameras,
+                // dispatchers
+            );
 
-            consumer.run(rx, messages).await
+            consumer.run(
+                rx,
+                // messages
+                ).await
         });
 
         loop {
@@ -438,53 +447,67 @@ impl Server for SpeedDaemonServer {
 
             println!("Connection open\n");
 
-            let messages = self.messages.clone();
-            let clients = self.clients.clone();
-            let cameras = self.cameras.clone();
-            let dispatchers = self.dispatchers.clone();
+            // let messages = self.messages.clone();
+            // let clients = self.clients.clone();
+            // let cameras = self.cameras.clone();
+            // let dispatchers = self.dispatchers.clone();
             let consumer = tx.clone();
 
             // A new task is spawned for each inbound socket. The socket is
             // moved to the new task and processed there.
             tokio::spawn(async move {
-                let mut client = Client::new(clients, cameras, dispatchers);
+                let mut client = GenericClient::new(
+                    // clients,
+                    // cameras,
+                    // dispatchers
+                );
 
-                client.run(consumer, messages, addr, stream).await
+                let res = client.run(
+                    consumer,
+                    // messages,
+                    addr,
+                    stream).await;
+                
+                println!("Connection closed: {}, err: {:?}", addr, &res);
+
+                res
             });
         }
     }
 }
 
+
 #[derive(Debug)]
 enum InternalMessage {
     NewClient,
+    NewMessage,
     ErrorMessage,
 }
 
 #[derive(Debug)]
 struct ProxyConsumer {
-    clients: Arc<Mutex<HashMap<SocketAddr, ClientType>>>,
-    cameras: Arc<Mutex<HashMap<u16, ClientInfo>>>,
-    dispatchers: Arc<Mutex<HashMap<u16, ClientInfo>>>,
+    // clients: Arc<Mutex<HashMap<SocketAddr, ClientType>>>,
+    // cameras: Arc<Mutex<HashMap<u16, ClientInfo>>>,
+    // dispatchers: Arc<Mutex<HashMap<u16, ClientInfo>>>,
 }
 
 impl ProxyConsumer {
     fn new(
-        clients: Arc<Mutex<HashMap<SocketAddr, ClientType>>>,
-        cameras: Arc<Mutex<HashMap<u16, ClientInfo>>>,
-        dispatchers: Arc<Mutex<HashMap<u16, ClientInfo>>>,
+        // clients: Arc<Mutex<HashMap<SocketAddr, ClientType>>>,
+        // cameras: Arc<Mutex<HashMap<u16, ClientInfo>>>,
+        // dispatchers: Arc<Mutex<HashMap<u16, ClientInfo>>>,
     ) -> Self {
         Self {
-            clients,
-            cameras,
-            dispatchers,
+            // clients,
+            // cameras,
+            // dispatchers,
         }
     }
 
     async fn run(
         &mut self,
         rx: mpsc::UnboundedReceiver<InternalMessage>,
-        messages: Arc<Mutex<VecDeque<MessageType>>>,
+        // messages: Arc<Mutex<VecDeque<MessageType>>>,
     ) -> Result<(), ServerErrorKind> {
         let mut rx = rx;
 
@@ -492,6 +515,9 @@ impl ProxyConsumer {
             match msg {
                 InternalMessage::NewClient => {
                     dbg!("New client");
+                }
+                InternalMessage::NewMessage => {
+                    dbg!("New message");
                 }
                 InternalMessage::ErrorMessage => {
                     dbg!("Error message");
@@ -505,274 +531,5 @@ impl ProxyConsumer {
     }
 }
 
-#[derive(Debug, Default)]
-enum ClientType {
-    #[default]
-    Unkwown,
-    Camera,
-    Dispatcher,
-}
 
-#[derive(Debug)]
-struct ClientInfo {
-    client_type: ClientType,
-    tx: mpsc::UnboundedSender<Vec<u8>>,
-}
 
-impl ClientInfo {
-    fn new(client_type: ClientType, tx: mpsc::UnboundedSender<Vec<u8>>) -> Self {
-        Self { client_type, tx }
-    }
-}
-
-#[derive(Debug)]
-struct Client {
-    clients: Arc<Mutex<HashMap<SocketAddr, ClientType>>>,
-    cameras: Arc<Mutex<HashMap<u16, ClientInfo>>>,
-    dispatchers: Arc<Mutex<HashMap<u16, ClientInfo>>>,
-}
-
-impl Client {
-    fn new(
-        clients: Arc<Mutex<HashMap<SocketAddr, ClientType>>>,
-        cameras: Arc<Mutex<HashMap<u16, ClientInfo>>>,
-        dispatchers: Arc<Mutex<HashMap<u16, ClientInfo>>>,
-    ) -> Self {
-        Self {
-            clients,
-            cameras,
-            dispatchers,
-        }
-    }
-
-    async fn run(
-        &mut self,
-        consumer: Arc<Mutex<UnboundedSender<InternalMessage>>>,
-        messages: Arc<Mutex<VecDeque<MessageType>>>,
-        addr: SocketAddr,
-        stream: TcpStream,
-    ) -> Result<(), ServerErrorKind> {
-        let mut client_type = ClientType::Unkwown;
-        let mut stream = BufStream::new(stream);
-        let mut line = vec![];
-        let mut should_continue = true;
-
-        let (tx, mut rx) = mpsc::unbounded_channel::<InternalMessage>();
-
-        // Store the client info
-        self.clients.lock().await.insert(addr, client_type);
-
-        // Send a message to the consumer
-        consumer
-            .lock()
-            .await
-            .send(InternalMessage::NewClient)
-            .unwrap();
-
-        while should_continue {
-            tokio::select! {
-                // If there is a message from a peer
-                Some(msg) = rx.recv() => {
-                    let response = match msg {
-                        InternalMessage::NewClient => {
-                            vec![]
-                        }
-                        _ => {
-                            vec![]
-                        }
-                    };
-
-                    if !response.is_empty() {
-                        // Send the message to the other end
-                        stream
-                            .write_all(&response)
-                            .await
-                            .map_err(|_| ServerErrorKind::WriteFail)?;
-
-                        // Flush the buffer to ensure it is sent
-                        stream
-                            .flush()
-                            .await
-                            .map_err(|_| ServerErrorKind::WriteFail)?;
-                    }
-                }
-                // If there's a request incoming
-                result = stream.read_until(b'\n', &mut line) => {
-                    let read_len = result.map_err(|_| ServerErrorKind::ReadFail)?;
-
-                    if read_len > 0 {
-                        // Process the received request/line
-                        if let Ok(msg) = MessageType::from_bytes(&line) {
-                            messages.lock().await.push_back(msg);
-                        }
-                    } else {
-                        should_continue = false;
-                    }
-
-                    line.clear();
-                }
-            }
-        }
-
-        dbg!("Connection closed: {}", addr);
-
-        Ok(())
-    }
-}
-
-#[derive(Debug, PartialEq)]
-enum MessageType {
-    Error(String),
-    Plate(String, u32),
-    Ticket(String, u16, u16, u32, u16, u32, u16),
-    WantHeartbeat(u32),
-    Heartbeat,
-    IAmCamera(u16, u16, u16),
-    IAmDispatcher(u8, Vec<u16>),
-}
-
-impl MessageType {
-    fn from_bytes(msg: &[u8]) -> Result<Self, String> {
-        let mut offset = 0;
-
-        match msg[offset] {
-            // Error
-            0x10 => {
-                Ok(MessageType::Error(Self::get_str(&msg[1..])?))
-            }
-            // Plate
-            0x20 => {
-                let plate = Self::get_str(&msg[1..])?;
-                let timestamp = Self::get_u32(&msg[2+plate.len()..])?;
-
-                Ok(MessageType::Plate(plate, timestamp))
-            }
-            // Ticket
-            0x21 => {
-                offset += 1;
-                let plate = Self::get_str(&msg[offset..])?;
-                offset += 1 + plate.len();
-                let road = Self::get_u16(&msg[offset..])?;
-                offset += 2;
-                let mile1 = Self::get_u16(&msg[offset..])?;
-                offset += 2;
-                let timestamp1 = Self::get_u32(&msg[offset..])?;
-                offset += 4;
-                let mile2 = Self::get_u16(&msg[offset..])?;
-                offset += 2;
-                let timestamp2 = Self::get_u32(&msg[offset..])?;
-                offset += 4;
-                let speed = Self::get_u16(&msg[offset..])?;
-
-                Ok(Self::Ticket(plate, road, mile1, timestamp1, mile2, timestamp2, speed))
-            }
-            // WantHeartbeat
-            0x40 => {
-                let interval = Self::get_u32(&msg[1..])?;
-
-                Ok(Self::WantHeartbeat(interval))
-            }
-            // Heartbeat
-            0x41 => {
-                Ok(Self::Heartbeat)
-            }
-            // IAmCamera
-            0x80 => {
-                let road = Self::get_u16(&msg[1..])?;
-                let mile = Self::get_u16(&msg[4..])?;
-                let limit = Self::get_u16(&msg[7..])?;
-
-                Ok(Self::IAmCamera(road, mile, limit))
-            }
-            // IAmDispatcher
-            0x81 => {
-                let numroads = Self::get_u8(&msg[1..])?;
-                let mut roads = vec![];
-
-                for i in 0..numroads {
-                    roads.push(Self::get_u16(&msg[(2 + 2*i as usize)..])?);
-                }
-
-                Ok(Self::IAmDispatcher(numroads, roads))
-            }
-            // Unknown
-            _ => Err("Unknown message type".to_string()),
-        }
-    }
-
-    fn get_u8(msg: &[u8]) -> Result<u8, String> {
-        if msg.len() >= 1 {
-            Ok(msg[0])
-        }
-        else {
-            Err(format!("Invalid length"))
-        }
-    }
-
-    fn get_u16(msg: &[u8]) -> Result<u16, String> {
-        if msg.len() >= 2 {
-            Ok(u16::from_be_bytes(msg[0..2].try_into().map_err(|_| "Cannot convert slice into array")?))
-        }
-        else {
-            Err(format!("Invalid length"))
-        }
-    }
-
-    fn get_u32(msg: &[u8]) -> Result<u32, String> {
-        if msg.len() >= 4 {
-            Ok(u32::from_be_bytes(msg[0..4].try_into().map_err(|_| "Cannot convert slice into array")?))
-        }
-        else {
-            Err(format!("Invalid length"))
-        }
-    }
-
-    fn get_str(msg: &[u8]) -> Result<String, String> {
-        let str_len = Self::get_u8(msg)? as usize;
-        if msg.len() >= 1 + str_len as usize {
-            let s = String::from_utf8(msg[1..str_len + 1].to_vec()).map_err(|_| "Cannot get str")?;
-
-            Ok(s)
-        }
-        else {
-            Err(format!("Invalid length"))
-        }
-    }
-}
-
-#[cfg(test)]
-mod test {
-    use super::*;
-
-    #[test]
-    fn test_message_type_from_bytes_error_success() {
-        let msg = vec![0x10, 0x05, 0x48, 0x65, 0x6c, 0x6c, 0x6f];
-        let msg_type = MessageType::from_bytes(&msg);
-
-        assert!(matches!(msg_type, Ok(MessageType::Error(_))));
-    }
-
-    #[test]
-    fn test_message_type_from_bytes_unknown_type_fail() {
-        let msg = vec![0x11, 0x05, 0x48, 0x65, 0x6c, 0x6c, 0x6f];
-        let msg_type = MessageType::from_bytes(&msg);
-
-        assert!(msg_type.is_err());
-    }
-
-    #[test]
-    fn test_message_type_from_bytes_error_invalid_length_fail() {
-        let msg = vec![0x10, 0x06, 0x48, 0x65, 0x6c, 0x6c, 0x6f];
-        let msg_type = MessageType::from_bytes(&msg);
-
-        assert!(msg_type.is_err());
-    }
-
-    #[test]
-    fn test_message_type_from_bytes_plate_success() {
-        let msg = vec![0x20, 0x04, b'T', b'L', b'9', b'5', 0x00, 0x00, 0x00, 0x10];
-        let msg_type = MessageType::from_bytes(&msg).expect("Unable to parse message");
-
-        assert_eq!(msg_type, MessageType::Plate("TL95".to_string(), 0x10));
-    }
-}
